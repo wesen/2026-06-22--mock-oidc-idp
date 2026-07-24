@@ -7,6 +7,7 @@ import { useSessionQuery, useWidgetPageQuery } from "./api";
 import { UserManagement } from "./UserManagement";
 import { InvitationManagement } from "./InvitationManagement";
 import { ClientManagement } from "./ClientManagement";
+import { KeyManagement } from "./KeyManagement";
 
 const pages = [
   ["overview", "Overview"],
@@ -78,6 +79,7 @@ export function App() {
         {page === "users" && <UserManagement session={session.data} />}
         {page === "invitations" && <InvitationManagement session={session.data} />}
         {page === "clients" && <ClientManagement session={session.data} />}
+        {page === "keys" && <KeyManagement session={session.data} />}
       </main>
       <WidgetToastRegion />
     </div>

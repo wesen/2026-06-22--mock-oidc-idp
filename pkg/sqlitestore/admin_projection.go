@@ -79,6 +79,27 @@ func (s *Store) InitializeAdminResourceVersions(ctx context.Context, now time.Ti
 				return err
 			}
 		}
+		keys, err := protocol.VerificationKeys(ctx)
+		if err != nil {
+			return err
+		}
+		if _, err := admin.GetResourceVersion(ctx, "keyring", "system"); errors.Is(err, idpadminstore.ErrNotFound) {
+			if err := admin.CreateResourceVersion(ctx, "keyring", "system", 1, now.UTC()); err != nil {
+				return err
+			}
+		} else if err != nil {
+			return err
+		}
+		for _, key := range keys {
+			if _, err := admin.GetResourceVersion(ctx, "signing_key", key.ID); err == nil {
+				continue
+			} else if !errors.Is(err, idpadminstore.ErrNotFound) {
+				return err
+			}
+			if err := admin.CreateResourceVersion(ctx, "signing_key", key.ID, 1, now.UTC()); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 }

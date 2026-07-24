@@ -397,7 +397,17 @@ func runProductionHost(ctx context.Context, settings *productionsection.Settings
 		_ = store.Close()
 		return err
 	}
-	adminCommands, err := idpadminapp.NewCommandDispatcher(adminExecutor, adminUsers, adminInvitations, adminClients)
+	adminKeys, err := idpadminapp.NewKeyCommandService(store, adminExecutor, time.Now)
+	if err != nil {
+		_ = provider.Close(context.Background())
+		_ = signupManager.Close(context.Background())
+		_ = audit.Close()
+		_ = store.Close()
+		return err
+	}
+	adminCommands, err := idpadminapp.NewCommandDispatcher(
+		adminExecutor, adminUsers, adminInvitations, adminClients, adminKeys,
+	)
 	if err != nil {
 		_ = provider.Close(context.Background())
 		_ = signupManager.Close(context.Background())

@@ -1831,3 +1831,94 @@ control-flow construct. The hook's package test suite had already passed.
   operations under an explicitly configured and confinement-checked root.
 - Wire both workers into the production `errgroup`, combine outbox health with
   readiness, and expose only safe operation metadata to the React console.
+
+## Step 12: Move signing-key rotation and retirement behind the control plane
+
+The signing-key slice now uses the same signed-action path as users,
+invitations, and clients. `ActionService` defines only `keys.rotate` and
+`keys.retire` for browser dispatch. Both require fresh authentication, an
+operator reason, and exact typed confirmation. Rotation targets the fixed
+`keyring/system` aggregate, while retirement targets an existing
+`signing_key/<kid>` resource. This distinction prevents the client from
+choosing an invented keyring identity while retaining per-key stale-tab
+protection.
+
+`InitializeAdminResourceVersions` now seeds:
+
+- the singleton `keyring/system` aggregate used to serialize rotations;
+- one `signing_key/<kid>` version for every published verification key.
+
+`KeyCommandService` generates the RSA private key before entering the short
+SQLite transaction. Inside the executor callback it creates and activates the
+new key, retires the prior active key without deleting its verification
+material, creates the new key's version, and commits action evidence,
+idempotency, and audit outbox state atomically. Responses use only
+`idpadmin.SigningKeyRow`; private PEM bytes cannot enter JSON, audit, or the
+Redux request cache.
+
+Retirement reloads the key from the transaction-scoped verification set,
+rejects an active key through the protocol store invariant, and executes under
+the per-key expected version. There is deliberately no `keys.purge` definition
+and no dispatcher branch for purge. `DeleteRetiredSigningKey` remains reachable
+only through `admin keys purge-retired`.
+
+The ordinary CLI `rotate` and `retire` commands now require the owner-only
+action key and call the shared action and command services. The CLI integration
+test verifies two resulting `keys.*` action rows. It then runs emergency purge
+and verifies that the action count remains two, proving purge did not acquire
+a browser/control-plane route accidentally.
+
+The React signing-key panel:
+
+- lists only the already-redacted page projection;
+- explains verification overlap and the CLI-only emergency boundary;
+- submits rotation and retirement through prepare/execute;
+- asks the operator to type `ROTATE` or `RETIRE`;
+- redirects to reauthentication on `fresh_auth_required`;
+- resets RTK Query mutation state after every attempt.
+
+Focused tests prove rotation keeps two verification keys, changes the active
+key, returns no private PEM, records retirement metadata, rejects stale
+authentication, and rejects missing reason or wrong confirmation. A source
+search found no purge/delete command in `pkg/idpadminapp` or the browser
+implementation; the only match is the explicit negative registry test.
+
+Validation completed:
+
+```text
+pnpm --dir internal/adminweb/frontend run check
+✓ tsc --noEmit
+✓ vite build
+
+go test ./pkg/idpadminapp -run TestSigningKey -count=1
+ok
+
+go test ./internal/cmds \
+  -run TestAdminKeyRotationAndRetirementUseGuardedCommandLayer -count=1
+ok
+
+go test ./... -run '^$' -count=1
+all packages compile
+```
+
+The broader sandboxed `internal/cmds` test run reached the known environment
+restriction in `httptest.NewServer`:
+
+```text
+listen tcp6 [::1]:0: socket: operation not permitted
+```
+
+No product assertion failed before that point. The complete suite will be run
+outside the socket sandbox at the Phase E gate.
+
+The first lint invocation was also unable to resolve the pinned
+`glazed-lint` module through the restricted DNS socket. The approved
+out-of-sandbox rerun completed with `0 issues`, including both custom vet
+analyzers.
+
+### What is next
+
+- Add durable doctor, managed backup create/verify, and sanitized one-use
+  diagnostics operations with strict backup-root confinement.
+- Run operation and outbox workers under the production host `errgroup`, then
+  expose their safe state in readiness and the Operations page.

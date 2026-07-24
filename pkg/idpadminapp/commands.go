@@ -18,6 +18,7 @@ type CommandDispatcher struct {
 	users       CommandExecutor
 	invitations CommandExecutor
 	clients     CommandExecutor
+	keys        CommandExecutor
 }
 
 func NewCommandDispatcher(
@@ -25,12 +26,13 @@ func NewCommandDispatcher(
 	users CommandExecutor,
 	invitations CommandExecutor,
 	clients CommandExecutor,
+	keys CommandExecutor,
 ) (*CommandDispatcher, error) {
-	if executor == nil || users == nil || invitations == nil || clients == nil {
+	if executor == nil || users == nil || invitations == nil || clients == nil || keys == nil {
 		return nil, errors.New("executor and all administration command services are required")
 	}
 	return &CommandDispatcher{
-		executor: executor, users: users, invitations: invitations, clients: clients,
+		executor: executor, users: users, invitations: invitations, clients: clients, keys: keys,
 	}, nil
 }
 
@@ -50,6 +52,8 @@ func (d *CommandDispatcher) Execute(
 		return d.invitations.Execute(ctx, request, rawInput)
 	case strings.HasPrefix(claims.Command, "clients."):
 		return d.clients.Execute(ctx, request, rawInput)
+	case strings.HasPrefix(claims.Command, "keys."):
+		return d.keys.Execute(ctx, request, rawInput)
 	default:
 		return nil, ErrUnknownCommand
 	}

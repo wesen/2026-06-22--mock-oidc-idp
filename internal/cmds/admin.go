@@ -216,6 +216,7 @@ type adminUserRuntime struct {
 	users       *idpadminapp.UserCommandService
 	invitations *idpadminapp.InvitationCommandService
 	clients     *idpadminapp.ClientCommandService
+	keys        *idpadminapp.KeyCommandService
 	principal   idpadmin.AdminPrincipal
 }
 
@@ -289,6 +290,11 @@ func openAdminCommandRuntime(
 		_ = store.Close()
 		return nil, err
 	}
+	keyCommands, err := idpadminapp.NewKeyCommandService(store, executor, clock)
+	if err != nil {
+		_ = store.Close()
+		return nil, err
+	}
 	var invitations *idpadminapp.InvitationCommandService
 	if strings.TrimSpace(invitationKeyFile) != "" {
 		invitationKey, err := readOwnerOnlySecret(invitationKeyFile)
@@ -309,7 +315,8 @@ func openAdminCommandRuntime(
 		}
 	}
 	return &adminUserRuntime{
-		store: store, actions: actions, users: users, invitations: invitations, clients: clients,
+		store: store, actions: actions, users: users, invitations: invitations,
+		clients: clients, keys: keyCommands,
 		principal: idpadmin.AdminPrincipal{
 			Subject: grant.ActorSubject, SessionID: sessionBinding,
 			Authenticated: now, Assurance: idpadmin.AssuranceFresh,

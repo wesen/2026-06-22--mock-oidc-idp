@@ -26,6 +26,8 @@ const (
 	CommandClientsEnable       = "clients.enable"
 	CommandClientsDisable      = "clients.disable"
 	CommandClientsRotateSecret = "clients.rotate_secret"
+	CommandKeysRotate          = "keys.rotate"
+	CommandKeysRetire          = "keys.retire"
 )
 
 var (
@@ -45,6 +47,7 @@ type ActionDefinition struct {
 	ConfirmationText string
 	GenerateTarget   bool
 	RequireExisting  bool
+	FixedTargetID    string
 }
 
 type PrepareActionRequest struct {
@@ -100,8 +103,16 @@ func (s *ActionService) Prepare(
 		return PreparedAction{}, ErrUnknownCommand
 	}
 	targetID := strings.TrimSpace(request.TargetID)
+	if definition.FixedTargetID != "" {
+		if targetID != "" {
+			return PreparedAction{}, ErrActionTarget
+		}
+		targetID = definition.FixedTargetID
+	}
 	if definition.RequireTarget && targetID == "" || !definition.RequireTarget && targetID != "" {
-		return PreparedAction{}, ErrActionTarget
+		if definition.FixedTargetID == "" {
+			return PreparedAction{}, ErrActionTarget
+		}
 	}
 	if _, err := s.authorizer.Authorize(
 		ctx, principal, principal.GrantID, principal.GrantVersion,
@@ -216,6 +227,16 @@ func actionDefinition(command string) (ActionDefinition, bool) {
 			Command: CommandClientsRotateSecret, Capability: idpadmin.CapabilityClientSecretRotate,
 			TargetType: "client", RequireTarget: true, RequireExisting: true,
 			RequireFresh: true, RequireReason: true, ConfirmationText: "ROTATE",
+		},
+		CommandKeysRotate: {
+			Command: CommandKeysRotate, Capability: idpadmin.CapabilityKeysRotate,
+			TargetType: "keyring", FixedTargetID: "system", RequireExisting: true,
+			RequireFresh: true, RequireReason: true, ConfirmationText: "ROTATE",
+		},
+		CommandKeysRetire: {
+			Command: CommandKeysRetire, Capability: idpadmin.CapabilityKeysRetire,
+			TargetType: "signing_key", RequireTarget: true, RequireExisting: true,
+			RequireFresh: true, RequireReason: true, ConfirmationText: "RETIRE",
 		},
 	}
 	definition, ok := definitions[command]

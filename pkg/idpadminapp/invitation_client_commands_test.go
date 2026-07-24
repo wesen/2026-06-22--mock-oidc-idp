@@ -11,6 +11,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/go-go-golems/tiny-idp/internal/keys"
 	"github.com/go-go-golems/tiny-idp/pkg/idpadmin"
 	"github.com/go-go-golems/tiny-idp/pkg/idpadminapp"
 	"github.com/go-go-golems/tiny-idp/pkg/idpinvite"
@@ -27,6 +28,7 @@ type resourceCommandFixture struct {
 	actions     *idpadminapp.ActionService
 	invitations *idpadminapp.InvitationCommandService
 	clients     *idpadminapp.ClientCommandService
+	keys        *idpadminapp.KeyCommandService
 	sequence    int
 }
 
@@ -158,6 +160,66 @@ func TestClientValidationRejectsUnsafeRedirectBeforeMutation(t *testing.T) {
 	require.ErrorIs(t, err, idpstore.ErrNotFound)
 }
 
+func TestSigningKeyRotationAndEligibleRetirementUseGuardedCommands(t *testing.T) {
+	fixture := newResourceCommandFixture(t)
+	old, err := fixture.store.ActiveSigningKey(fixture.ctx)
+	require.NoError(t, err)
+
+	rotate := fixture.prepare(t, idpadminapp.CommandKeysRotate, "")
+	response, _ := fixture.execute(t, fixture.keys, rotate, map[string]any{
+		"algorithm": "RS256", "reason": "Scheduled rotation", "confirmation": "ROTATE",
+	})
+	var rotated idpadmin.KeyResult
+	require.NoError(t, json.Unmarshal(response, &rotated))
+	require.True(t, rotated.Key.Active)
+	require.NotEqual(t, old.ID, rotated.Key.ID)
+	require.NotEmpty(t, rotated.Key.CreatedAt)
+	require.NotContains(t, string(response), "PRIVATE KEY")
+
+	active, err := fixture.store.ActiveSigningKey(fixture.ctx)
+	require.NoError(t, err)
+	require.Equal(t, rotated.Key.ID, active.ID)
+	verification, err := fixture.store.VerificationKeys(fixture.ctx)
+	require.NoError(t, err)
+	require.Len(t, verification, 2)
+
+	retire := fixture.prepare(t, idpadminapp.CommandKeysRetire, old.ID)
+	response, _ = fixture.execute(t, fixture.keys, retire, map[string]any{
+		"reason": "Verification overlap completed", "confirmation": "RETIRE",
+	})
+	var retired idpadmin.KeyResult
+	require.NoError(t, json.Unmarshal(response, &retired))
+	require.Equal(t, old.ID, retired.Key.ID)
+	require.False(t, retired.Key.Active)
+	require.NotNil(t, retired.Key.NotAfter)
+
+	_, err = fixture.actions.Prepare(fixture.ctx, fixture.principal, idpadminapp.PrepareActionRequest{
+		Command: "keys.purge", TargetID: old.ID,
+	})
+	require.ErrorIs(t, err, idpadminapp.ErrUnknownCommand)
+}
+
+func TestSigningKeyRotationRequiresFreshAuthenticationReasonAndConfirmation(t *testing.T) {
+	fixture := newResourceCommandFixture(t)
+	notFresh := fixture.principal
+	notFresh.Assurance = idpadmin.AssuranceAuthenticated
+	notFresh.Authenticated = fixture.now.Add(-10 * time.Minute)
+	_, err := fixture.actions.Prepare(fixture.ctx, notFresh, idpadminapp.PrepareActionRequest{
+		Command: idpadminapp.CommandKeysRotate,
+	})
+	require.ErrorIs(t, err, idpadmin.ErrFreshAuthRequired)
+
+	prepared := fixture.prepare(t, idpadminapp.CommandKeysRotate, "")
+	_, err = fixture.executeRaw(fixture.keys, prepared, map[string]any{
+		"algorithm": "RS256", "confirmation": "ROTATE",
+	})
+	require.ErrorIs(t, err, idpadminapp.ErrReasonRequired)
+	_, err = fixture.executeRaw(fixture.keys, prepared, map[string]any{
+		"algorithm": "RS256", "reason": "Scheduled rotation", "confirmation": "rotate",
+	})
+	require.ErrorIs(t, err, idpadminapp.ErrConfirmationFailed)
+}
+
 func newResourceCommandFixture(t *testing.T) *resourceCommandFixture {
 	t.Helper()
 	ctx := context.Background()
@@ -186,13 +248,20 @@ func newResourceCommandFixture(t *testing.T) *resourceCommandFixture {
 	require.NoError(t, err)
 	clients, err := idpadminapp.NewClientCommandService(store, executor, clock)
 	require.NoError(t, err)
+	initialKey, err := keys.GenerateRSA("initial-signing-key", now.Add(-24*time.Hour))
+	require.NoError(t, err)
+	initialKey.Active = true
+	require.NoError(t, store.CreateSigningKey(ctx, initialKey))
+	require.NoError(t, store.InitializeAdminResourceVersions(ctx, now))
+	keyCommands, err := idpadminapp.NewKeyCommandService(store, executor, clock)
+	require.NoError(t, err)
 	return &resourceCommandFixture{
 		ctx: ctx, now: now, store: store, actions: actions,
 		principal: idpadmin.AdminPrincipal{
 			Subject: "owner-sub", SessionID: "session-binding", Authenticated: now,
 			Assurance: idpadmin.AssuranceFresh, GrantID: grant.ID, GrantVersion: grant.Version,
 		},
-		invitations: invitations, clients: clients,
+		invitations: invitations, clients: clients, keys: keyCommands,
 	}
 }
 
