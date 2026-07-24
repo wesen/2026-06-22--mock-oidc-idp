@@ -2,7 +2,7 @@
 set -eu
 
 if [ "$#" -lt 3 ]; then
-  printf 'usage: %s <profile> <compose-file> <status|reset> [--confirm reset-<profile>-state]\n' "$0" >&2
+  printf 'usage: %s <profile> <compose-file> <status|reset|reset-local> [--confirm reset-<profile>-state]\n' "$0" >&2
   exit 2
 fi
 
@@ -33,24 +33,25 @@ case "$operation" in
     fi
     exec docker compose -f "$compose_path" ps -a
     ;;
-  reset)
+  reset|reset-local)
     expected="reset-$profile-state"
     if [ "$#" -ne 2 ] || [ "$1" != "--confirm" ] || [ "$2" != "$expected" ]; then
       printf 'refusing state reset; rerun with --confirm %s\n' "$expected" >&2
       exit 2
     fi
 
-    if ! docker compose -f "$compose_path" config --format json |
-      jq -e '.volumes["caddy-data"].external == true and .volumes["caddy-data"].name == "tinyidp-local-caddy-pki"' >/dev/null
-    then
-      printf 'refusing state reset; Compose does not declare the protected external Caddy volume\n' >&2
-      exit 2
-    fi
-
     caddy_volume=tinyidp-local-caddy-pki
     before=
-    if docker volume inspect "$caddy_volume" >/dev/null 2>&1; then
-      before=$(docker volume inspect --format '{{.CreatedAt}}|{{.Mountpoint}}' "$caddy_volume")
+    if [ "$operation" = "reset" ]; then
+      if ! docker compose -f "$compose_path" config --format json |
+        jq -e '.volumes["caddy-data"].external == true and .volumes["caddy-data"].name == "tinyidp-local-caddy-pki"' >/dev/null
+      then
+        printf 'refusing state reset; Compose does not declare the protected external Caddy volume\n' >&2
+        exit 2
+      fi
+      if docker volume inspect "$caddy_volume" >/dev/null 2>&1; then
+        before=$(docker volume inspect --format '{{.CreatedAt}}|{{.Mountpoint}}' "$caddy_volume")
+      fi
     fi
 
     docker compose -f "$compose_path" down --volumes --remove-orphans
@@ -62,7 +63,11 @@ case "$operation" in
         exit 1
       fi
     fi
-    printf 'Reset application state for profile %s; retained external Caddy PKI volume\n' "$profile"
+    if [ "$operation" = "reset" ]; then
+      printf 'Reset application state for profile %s; retained external Caddy PKI volume\n' "$profile"
+    else
+      printf 'Reset local application state for profile %s\n' "$profile"
+    fi
     ;;
   *)
     printf 'unknown state operation: %s\n' "$operation" >&2

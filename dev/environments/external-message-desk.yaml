@@ -16,4 +16,5 @@ runtime:
       command: [docker, compose, up, --build, --remove-orphans]
 prepare: {}
 commands:
-  state-status: [docker, compose, -f, examples/tinyidp-external-message-desk/compose.yaml, ps, -a]
+  state-status: [dev/scripts/compose-state.sh, external-message-desk, examples/tinyidp-external-message-desk/compose.yaml, status]
+  state-reset: [dev/scripts/compose-state.sh, external-message-desk, examples/tinyidp-external-message-desk/compose.yaml, reset-local]

@@ -76,6 +76,16 @@ runtime: {kind: utility, services: []}
                 self.assertIsNotNone(reset)
                 self.assertIn("dev/scripts/compose-state.sh", reset)
 
+    def test_external_message_desk_has_guarded_local_reset(self) -> None:
+        manifest = load_manifest(
+            REPO_ROOT,
+            "dev/environments/external-message-desk.yaml",
+        )
+        self.assertEqual(
+            manifest.commands["state-reset"][-1],
+            "reset-local",
+        )
+
     def test_compose_secret_contracts_reference_materialized_files(self) -> None:
         for profile in ("admin-console", "shared-two-apps", "jitsi"):
             manifest = load_manifest(
