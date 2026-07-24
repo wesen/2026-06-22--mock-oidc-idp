@@ -70,9 +70,16 @@ type AuditOutboxRecord struct {
 	LastError   string
 }
 
+type ProjectionReport struct {
+	SourceRows     int `json:"source_rows"`
+	ProjectionRows int `json:"projection_rows"`
+	Mismatches     int `json:"mismatches"`
+}
+
 type GrantStore interface {
 	CreateAdminGrant(ctx context.Context, grant idpadmin.Grant) error
 	GetAdminGrant(ctx context.Context, id string) (idpadmin.Grant, error)
+	GetActiveSystemOwner(ctx context.Context, now time.Time) (idpadmin.Grant, error)
 	FindActiveAdminGrant(ctx context.Context, subject string, scope idpadmin.AdminScope, now time.Time) (idpadmin.Grant, error)
 	RevokeAdminGrant(ctx context.Context, id string, expectedVersion int64, at time.Time) error
 }
@@ -104,7 +111,13 @@ type AtomicStore interface {
 	AdminUpdate(ctx context.Context, fn func(idpstore.TxStore, TxStore) error) error
 }
 
+type ProjectionStore interface {
+	RebuildAdminUserProjection(ctx context.Context, now time.Time) (ProjectionReport, error)
+	CheckAdminUserProjection(ctx context.Context, now time.Time) (ProjectionReport, error)
+}
+
 type Store interface {
 	TxStore
 	AtomicStore
+	ProjectionStore
 }

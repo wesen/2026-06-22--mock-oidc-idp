@@ -34,6 +34,11 @@ throwaway databases only.`,
 	cmd.AddCommand(newAdminClientCommand(&dbPath))
 	cmd.AddCommand(newAdminKeysCommand(&dbPath))
 	cmd.AddCommand(newAdminUserCommand(&dbPath))
+	console, err := newAdminConsoleCommand(&dbPath)
+	if err != nil {
+		return nil, err
+	}
+	cmd.AddCommand(console)
 	invitation, err := newAdminInvitationCommand(&dbPath)
 	if err != nil {
 		return nil, err

@@ -18,20 +18,40 @@ RelatedFiles:
       Note: Reference implementation inspected during research
     - Path: repo://internal/admin/service.go
       Note: Evidence inspected during current-state research
+    - Path: repo://internal/cmds/admin.go
+      Note: Registers the console operator command group
+    - Path: repo://internal/cmds/admin_console.go
+      Note: Glazed console owner lifecycle commands
+    - Path: repo://internal/cmds/admin_console_test.go
+      Note: Glazed command wiring and lifecycle tests
     - Path: repo://internal/cmds/serve_production.go
       Note: Evidence for public and internal listener boundaries
     - Path: repo://pkg/idp/audit.go
       Note: Evidence for post-commit delivery semantics
     - Path: repo://pkg/idpadmin/action_handle.go
       Note: Short-lived signed and session-bound action authority
+    - Path: repo://pkg/idpadmin/contracts.go
+      Note: Safe query and command application contracts and DTOs
+    - Path: repo://pkg/idpadmin/contracts_test.go
+      Note: Pagination and secret-exposure contract tests
     - Path: repo://pkg/idpadmin/model.go
       Note: Administration scopes, capabilities, principals, grants, and server-side authorization
     - Path: repo://pkg/idpadmin/model_test.go
       Note: Authorization and action-handle security tests
+    - Path: repo://pkg/idpadminapp/executor.go
+      Note: Atomic authorized mutation, replay, CAS, idempotency, evidence, and outbox pipeline
+    - Path: repo://pkg/idpadminapp/executor_test.go
+      Note: Mutation atomicity, rollback, retry, conflict, and one-time-secret tests
+    - Path: repo://pkg/idpadminapp/owner.go
+      Note: Owner bootstrap, status, grant revocation, and session recovery orchestration
+    - Path: repo://pkg/idpadminapp/owner_test.go
+      Note: Owner lifecycle and fixed-client invariant tests
     - Path: repo://pkg/idpadminstore/store.go
       Note: Control-plane persistence and cross-domain transaction contracts
     - Path: repo://pkg/idpstore/interfaces.go
       Note: Evidence for point queries and atomic mutations
+    - Path: repo://pkg/sqlitestore/admin_projection.go
+      Note: Canonical user projection rebuild and drift checker
     - Path: repo://pkg/sqlitestore/admin_store.go
       Note: SQLite implementation of administration security state and atomic updates
     - Path: repo://pkg/sqlitestore/admin_store_test.go
@@ -48,6 +68,7 @@ LastUpdated: 2026-07-23T20:14:57.931345362-04:00
 WhatFor: Preserve how the administration-backend proposal was derived, including concrete evidence, failed assumptions, and review instructions.
 WhenToUse: Read when reviewing the design, implementing a phase, or continuing the investigation.
 ---
+
 
 
 
@@ -535,6 +556,24 @@ This slice deliberately stops below HTTP and UI. It proves that presentation cod
 
 - The first invitation-metadata migration draft referenced `durable_invitations(id)`, but the existing table is keyed only by `code_hash`. Inspection caught the mismatch before commit; the invalid foreign key was removed.
 
+- The first pre-commit run exposed a flaky tamper-test technique. Replacing the final Base64URL character can change only unused encoding bits, so the decoded signature may remain identical:
+
+  ```text
+  --- FAIL: TestActionHandleTamperExpiryAndBinding (0.00s)
+      model_test.go:75:
+          Error: Expected error with "invalid administration action handle" in chain but got nil.
+  ```
+
+  The test now changes a character in the signed payload segment while retaining the original signature. The focused tests and the complete pre-commit test/lint hooks then passed.
+
+- The obsolete top-level form `docmgr file-note --help` failed with:
+
+  ```text
+  Error: unknown command "file-note" for "docmgr"
+  ```
+
+  Current docmgr uses `docmgr doc relate --file-note`; that command related all eight implementation files and `docmgr doctor` passed.
+
 ### What I learned
 
 - Existing migrations serialize durable invitations into a `data` blob and expose no stable relational invitation ID. Admin display metadata must remain independently keyed until invitation storage is deliberately remodeled in Phase D.
@@ -584,4 +623,162 @@ AdminUpdate(ctx, func(protocol idpstore.TxStore, admin idpadminstore.TxStore) er
     // 5. enqueue audit event
     return nil // one commit, or one rollback
 })
+```
+
+## Step 6: Complete the Phase A application and operator boundary
+
+The second implementation slice completed the parts that turn the security substrate into an operable control plane. It added safe query and command contracts, established `pkg/idpadminapp` as the application orchestration layer, implemented the complete owner bootstrap and recovery lifecycle through Glazed commands, added a deterministic user-projection rebuild/check facility, and implemented the shared atomic mutation executor.
+
+The executor is the key result of this step. It verifies a signed handle, reauthorizes against the current grant, recognizes prior idempotent results, consumes the action nonce, advances the target's compare-and-set version, calls the domain mutation, records action evidence, enqueues a sanitized audit event, and stores the idempotency result inside one SQLite transaction. A failure at any stage rolls all stages back.
+
+### Prompt Context
+
+**User prompt (verbatim):** (same as Step 4)
+
+**Assistant interpretation:** Finish every Phase A task from the implementation guide and preserve test evidence and architectural corrections in the ticket.
+
+**Inferred user intent:** Establish a secure, CLI-operable backend foundation before exposing any administration HTTP route or UI.
+
+### What I did
+
+- Added `pkg/idpadmin/contracts.go` with:
+  - typed cursor requests and bounded page sizes;
+  - safe overview, user, invitation, client, key, activity, and operation DTOs;
+  - the full `QueryService` and `CommandService` interfaces;
+  - request and result types, including a distinct one-time-secret result.
+- Added `pkg/idpadminapp/owner.go`:
+  - fixed public PKCE client bootstrap;
+  - exact HTTPS-origin validation;
+  - single active owner grant creation;
+  - status, grant revocation, and session revocation;
+  - atomic action/outbox evidence.
+- Added four Glazed CLI commands beneath `tinyidp admin console`:
+  - `bootstrap`;
+  - `status`;
+  - `revoke-grant`;
+  - `revoke-session`.
+- Added `admin_projection.go` with canonical rebuild and non-mutating drift comparison.
+- Added `executor.go` with authorization, idempotency, replay, CAS, mutation, evidence, and outbox handling.
+- Changed persisted action nonces and action evidence to store SHA-256 keys rather than raw handle nonces.
+- Updated the design's package map to show the discovered application-layer boundary.
+
+### Why
+
+- DTOs must make it impossible for Widget DSL or React code to receive password hashes, client secret hashes, or private signing keys.
+- Owner authority must be bootstrapped and recoverable without depending on the web console it authorizes.
+- The public admin client is fixed and public with PKCE so no second long-lived client secret exists.
+- Projection drift must be observable and repairable before production query endpoints depend on it.
+- Mutation invariants must have one implementation rather than being reassembled independently in every HTTP handler.
+
+### What worked
+
+- Focused domain, application, SQLite, and command tests passed.
+- The complete repository test suite passed with `go test ./...`, including the
+  61-second Fosite adapter suite, server tests, SQLite tests, scripts, and
+  production harness packages.
+- `make lint` passed `golangci-lint`, standard `go vet`, Glazed CLI lint, and
+  the project-specific IDP UI analyzer with zero reported issues.
+- The complete `internal/cmds` suite passed when allowed to bind its existing loopback test servers:
+
+  ```text
+  ok   github.com/go-go-golems/tiny-idp/internal/cmds  1.080s
+  ```
+
+- Owner tests prove:
+  - an existing login is required;
+  - the client is public, PKCE-required, authorization-code-only, and secretless;
+  - a second active owner is rejected by the database;
+  - status finds the current owner;
+  - grant and session revocation persist.
+- Projection tests rebuild from user/security/session/grant sources, verify counts and version, and detect deliberate drift.
+- Executor tests prove successful atomic evidence, cached idempotent replay, conflicting request rejection, nonce restoration after stale-CAS rollback, and non-replay of one-time secrets.
+
+### What didn't work
+
+- The first attempt to place owner orchestration in `pkg/idpadmin` would have created this import cycle:
+
+  ```text
+  idpadmin -> idpadminstore -> idpadmin
+  ```
+
+  This was caught while editing, before accepting a compiling-but-misowned workaround. The service moved to the explicit `pkg/idpadminapp` layer.
+
+- The sandboxed full command test could not bind an existing `httptest` server:
+
+  ```text
+  panic: httptest: failed to listen on a port: listen tcp6 [::1]:0: socket: operation not permitted
+  ```
+
+  Focused console tests passed inside the sandbox. The unchanged full package test passed with approved loopback permission.
+
+- The first CLI lifecycle assertion reused `rowVal`, a helper that assumes every Glazed value is a string. The new `configured` field is a Boolean:
+
+  ```text
+  panic: interface conversion: interface {} is bool, not string
+  ```
+
+  The console test now uses a typed `anyRowVal` helper. The next focused run passed.
+
+- The initial projection rebuild called canonical-read helpers on the outer store while a single-connection transaction was active. Review caught that this could wait on its own connection. The implementation now uses the callback-scoped `*Store` for every rebuild query and write.
+
+### What I learned
+
+- Store-dependent administration services require a distinct application package because persistence contracts already depend on domain types. This is a real dependency rule, not a naming preference.
+- Existing Glazed commands provide a strong local pattern: inject the inherited database pointer, decode only command settings from `values.Values`, emit typed rows, and default the output section to JSON.
+- A projection consistency checker should not repair resource versions as a side effect. Rebuild initializes missing versions; check reports a missing version as drift.
+- Idempotent replay must occur before nonce consumption. Otherwise a legitimate retry of a completed request would be indistinguishable from an attack.
+- Secret-bearing idempotency needs a durable execution marker but must never persist or return the original secret again.
+
+### What was tricky to build
+
+- Bootstrap needs to validate an existing fixed client exactly without using the existing replace-oriented client write as an accidental compatibility path. An incompatible fixed client causes a hard conflict.
+- Owner revocation action evidence still references the just-revoked grant. SQLite permits this because revocation updates the row rather than deleting it.
+- Canonical projection counts require decoding the repository's blob-backed sessions and grants. The table name in the generic counter remains a closed internal constant; all user-derived values remain SQL parameters.
+- The executor must return cached response bytes from inside a transaction callback without proceeding to nonce, CAS, or mutation steps.
+
+### What warrants a second pair of eyes
+
+- Confirm the public console client's five-minute access and ID-token lifetimes.
+- Review whether CLI bootstrap should enqueue only the new outbox audit, emit the existing JSONL audit, or retain both during the migration period. It currently does both.
+- Review the 24-hour idempotency retention before cleanup workers are implemented.
+- Review the application package name and dependency diagram now recorded in the design.
+- Review whether resource projection maintenance should remain named-command updates or move to database-normalized source columns in a later migration.
+
+### What should be done in the future
+
+- Phase B should construct the first read-only query service over `admin_user_projection`.
+- The auth/session layer should register action nonces when a mutation widget handle is minted.
+- Maintenance should delete expired nonces and idempotency records and deliver outbox records in bounded batches.
+- Query benchmarks should validate the 10,000-user target once cursor SQL is implemented.
+
+### Code review instructions
+
+- Review contracts in `pkg/idpadmin/contracts.go`.
+- Follow operator flow from `internal/cmds/admin_console.go` to `pkg/idpadminapp/owner.go`.
+- Review projection transaction ownership in `pkg/sqlitestore/admin_projection.go`.
+- Treat `pkg/idpadminapp/executor.go` and its tests as a security-critical unit.
+- Run focused verification:
+
+  ```text
+  GOCACHE=/tmp/tinyidp-admin-go-cache go test \
+    ./pkg/idpadmin ./pkg/idpadminstore ./pkg/idpadminapp ./pkg/sqlitestore
+  GOCACHE=/tmp/tinyidp-admin-go-cache go test ./internal/cmds
+  ```
+
+### Technical details
+
+The implemented execution order is:
+
+```text
+verify signed handle
+  -> reload and authorize current grant
+  -> BEGIN SQLite write transaction
+     -> return matching prior idempotency result, if any
+     -> consume H(action nonce)
+     -> compare/increment resource version
+     -> execute protocol/domain mutation
+     -> insert admin action
+     -> enqueue sanitized audit payload
+     -> persist non-secret idempotency result
+  -> COMMIT
 ```

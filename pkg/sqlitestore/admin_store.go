@@ -2,7 +2,9 @@ package sqlitestore
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -101,6 +103,22 @@ func (s *Store) FindActiveAdminGrant(ctx context.Context, subject string, scope 
 	return s.GetAdminGrant(ctx, id)
 }
 
+func (s *Store) GetActiveSystemOwner(ctx context.Context, now time.Time) (idpadmin.Grant, error) {
+	var id string
+	err := s.conn().QueryRowContext(ctx, `
+		SELECT id FROM admin_grants
+		WHERE scope_kind='system' AND scope_id='system' AND role='owner'
+		  AND revoked_at_ns IS NULL AND (expires_at_ns IS NULL OR expires_at_ns>?)
+		ORDER BY issued_at_ns DESC LIMIT 1`, now.UnixNano()).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return idpadmin.Grant{}, idpadmin.ErrGrantNotFound
+	}
+	if err != nil {
+		return idpadmin.Grant{}, err
+	}
+	return s.GetAdminGrant(ctx, id)
+}
+
 func (s *Store) RevokeAdminGrant(ctx context.Context, id string, expectedVersion int64, at time.Time) error {
 	result, err := s.conn().ExecContext(ctx, `
 		UPDATE admin_grants SET revoked_at_ns=?, version=version+1
@@ -171,7 +189,7 @@ func (s *Store) RevokeAdminSession(ctx context.Context, idHash []byte, at time.T
 func (s *Store) CreateActionNonce(ctx context.Context, nonce, sessionID string, expiresAt time.Time) error {
 	_, err := s.conn().ExecContext(ctx, `
 		INSERT INTO admin_action_nonces(nonce, session_id, expires_at_ns) VALUES (?, ?, ?)`,
-		nonce, sessionID, expiresAt.UnixNano())
+		actionNonceKey(nonce), sessionID, expiresAt.UnixNano())
 	if isConstraint(err) {
 		return idpadminstore.ErrDuplicate
 	}
@@ -182,7 +200,7 @@ func (s *Store) ConsumeActionNonce(ctx context.Context, nonce, sessionID string,
 	result, err := s.conn().ExecContext(ctx, `
 		UPDATE admin_action_nonces SET consumed_at_ns=?
 		WHERE nonce=? AND session_id=? AND consumed_at_ns IS NULL AND expires_at_ns>?`,
-		now.UnixNano(), nonce, sessionID, now.UnixNano())
+		now.UnixNano(), actionNonceKey(nonce), sessionID, now.UnixNano())
 	if err != nil {
 		return err
 	}
@@ -262,7 +280,7 @@ func (s *Store) InsertAdminAction(ctx context.Context, action idpadminstore.Acti
 			(id, nonce, actor_subject, grant_id, grant_version, capability, command, target_type,
 			 target_id, expected_version, status, error_code, created_at_ns, completed_at_ns)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		action.ID, action.Nonce, action.Subject, action.GrantID, action.GrantVersion, action.Capability,
+		action.ID, actionNonceKey(action.Nonce), action.Subject, action.GrantID, action.GrantVersion, action.Capability,
 		action.Command, action.TargetType, action.TargetID, action.ExpectedVersion, action.Status,
 		action.ErrorCode, action.CreatedAt.UnixNano(), nullableTime(action.CompletedAt))
 	if isConstraint(err) {
@@ -289,6 +307,11 @@ func nullableTime(value *time.Time) any {
 		return nil
 	}
 	return value.UnixNano()
+}
+
+func actionNonceKey(nonce string) string {
+	sum := sha256.Sum256([]byte(nonce))
+	return hex.EncodeToString(sum[:])
 }
 
 func timePointer(value sql.NullInt64) *time.Time {

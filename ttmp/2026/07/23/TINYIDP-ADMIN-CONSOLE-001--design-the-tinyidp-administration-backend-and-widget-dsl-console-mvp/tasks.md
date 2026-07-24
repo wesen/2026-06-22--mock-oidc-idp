@@ -11,10 +11,10 @@
 
 ## Phase A — Control-plane foundation
 
-- [ ] Add `pkg/idpadmin` principals, scope, capabilities, authorizer, queries, commands, and action handles.
-- [ ] Add `pkg/idpadminstore` contracts and SQLite migrations/implementation.
-- [ ] Add owner grant bootstrap/status/revoke CLI commands.
-- [ ] Add resource versions, action nonces, idempotency, actions, and audit outbox.
+- [x] Add `pkg/idpadmin` principals, scope, capabilities, authorizer, queries, commands, and action handles.
+- [x] Add `pkg/idpadminstore` contracts and SQLite migrations/implementation.
+- [x] Add owner grant bootstrap/status/revoke CLI commands.
+- [x] Add resource versions, action nonces, idempotency, actions, and audit outbox.
 
 ## Phase B — Authenticated read-only console
 

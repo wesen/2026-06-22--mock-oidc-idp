@@ -91,6 +91,61 @@ func TestActionNonceAndResourceVersionAreCompareAndSet(t *testing.T) {
 	}
 }
 
+func TestAdminUserProjectionRebuildMatchesCanonicalState(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	now := time.Date(2026, 7, 23, 23, 0, 0, 0, time.UTC)
+	created := now.Add(-24 * time.Hour)
+	lastLogin := now.Add(-time.Hour)
+	requireNoError(t, st.PutUser(ctx, "alice", idpstore.User{
+		ID: "user-1", Sub: "subject-1", Email: "alice@example.com", Name: "Alice",
+		CreatedAt: created, UpdatedAt: lastLogin,
+	}))
+	requireNoError(t, st.PutAccountSecurityState(ctx, idpstore.AccountSecurityState{
+		UserID: "user-1", LastSuccessfulLoginAt: &lastLogin,
+	}))
+	requireNoError(t, st.CreateSession(ctx, idpstore.Session{
+		IDHash: []byte("session-hash"), UserID: "user-1", ExpiresAt: now.Add(time.Hour),
+	}))
+	requireNoError(t, st.CreateGrant(ctx, idpstore.Grant{
+		ID: "oidc-grant-1", UserID: "user-1", ExpiresAt: now.Add(time.Hour),
+	}))
+
+	report, err := st.RebuildAdminUserProjection(ctx, now)
+	requireNoError(t, err)
+	if report.SourceRows != 1 || report.ProjectionRows != 1 || report.Mismatches != 0 {
+		t.Fatalf("rebuild report = %#v", report)
+	}
+	report, err = st.CheckAdminUserProjection(ctx, now)
+	requireNoError(t, err)
+	if report.Mismatches != 0 {
+		t.Fatalf("check report = %#v", report)
+	}
+	var sessions, grants, version int
+	requireNoError(t, st.SQLDB().QueryRowContext(ctx, `
+		SELECT active_session_count, active_grant_count, version
+		FROM admin_user_projection WHERE user_id='user-1'`).Scan(&sessions, &grants, &version))
+	if sessions != 1 || grants != 1 || version != 1 {
+		t.Fatalf("projection counts/version = %d/%d/%d", sessions, grants, version)
+	}
+
+	_, err = st.SQLDB().ExecContext(ctx, `
+		UPDATE admin_user_projection SET email='drift@example.com' WHERE user_id='user-1'`)
+	requireNoError(t, err)
+	report, err = st.CheckAdminUserProjection(ctx, now)
+	requireNoError(t, err)
+	if report.Mismatches != 1 {
+		t.Fatalf("drift report = %#v", report)
+	}
+}
+
+func requireNoError(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func testAdminGrant(now time.Time) idpadmin.Grant {
 	return idpadmin.Grant{
 		ID: "grant-1", ActorSubject: "subject-1", Scope: idpadmin.SystemScope(), Role: "owner",

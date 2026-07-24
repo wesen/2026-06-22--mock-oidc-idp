@@ -5,6 +5,7 @@
 - Started implementation on `feat/tinyidp-admin-console`.
 - Added the Phase A security model, signed action handles, persistence contracts, SQLite control-plane schema, query-projection schema, and atomic store implementation.
 - Added focused tests for authorization, handle integrity/binding/expiry, grant lifecycle, replay prevention, CAS, and cross-domain rollback.
+- Completed Phase A with typed safe query/command contracts, a separate application orchestration layer, Glazed owner lifecycle commands, deterministic user-projection rebuild/drift checks, and an atomic mutation executor.
 
 ## 2026-07-23
 

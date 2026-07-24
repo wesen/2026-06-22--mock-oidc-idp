@@ -348,22 +348,20 @@ pkg/idpadmin/
   commands.go           # CommandService and request DTOs
   actionhandle.go       # signed opaque handle claims and verification
   errors.go             # stable domain error codes
-  service.go            # application service composition
+
+pkg/idpadminapp/
+  owner.go              # owner bootstrap, status, and recovery orchestration
+  executor.go           # atomic authorized mutation execution
 
 pkg/idpadminstore/
   interfaces.go         # grants, sessions, query, command, action, outbox contracts
   types.go              # persistence records, cursor and operation types
 
 pkg/sqlitestore/
-  admin_grants.go
-  admin_sessions.go
-  admin_queries.go
-  admin_commands.go
-  admin_actions.go
-  admin_outbox.go
-  admin_operations.go
+  admin_store.go        # grants, sessions, action security, evidence, outbox
+  admin_projection.go   # canonical user projection rebuild and comparison
   migrations/016_admin_control_plane.sql
-  migrations/017_admin_query_projection.sql
+  migrations/017_admin_user_projection.sql
 
 internal/adminweb/
   handler.go            # public route composition
@@ -390,6 +388,18 @@ internal/adminweb/
 internal/cmds/
   admin_console.go      # bootstrap/status/revoke-session CLI commands
   serve_production.go   # mount admin handler and close its workers
+```
+
+`pkg/idpadminapp` is a deliberate application layer. `pkg/idpadminstore`
+depends on `pkg/idpadmin` for domain values, so store-dependent orchestration
+cannot live in `pkg/idpadmin` without an import cycle. The dependency direction
+is:
+
+```text
+idpadmin domain <- idpadminstore contracts <- idpadminapp orchestration
+                                      ^
+                                      |
+                              sqlitestore implementation
 ```
 
 Product-specific UI remains under `internal/`. The shareable Widget DSL stays in `rag-evaluation-system`; do not fork renderer components into TinyIDP. The application and persistence interfaces are public packages because the CLI and embedded hosts need a supported common control-plane boundary.
