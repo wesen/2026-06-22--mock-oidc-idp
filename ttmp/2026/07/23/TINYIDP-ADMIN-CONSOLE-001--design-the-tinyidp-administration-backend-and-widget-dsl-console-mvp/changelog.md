@@ -2,6 +2,12 @@
 
 ## 2026-07-23
 
+- Started implementation on `feat/tinyidp-admin-console`.
+- Added the Phase A security model, signed action handles, persistence contracts, SQLite control-plane schema, query-projection schema, and atomic store implementation.
+- Added focused tests for authorization, handle integrity/binding/expiry, grant lifecycle, replay prevention, CAS, and cross-domain rollback.
+
+## 2026-07-23
+
 - Initial workspace created
 
 
@@ -24,4 +30,3 @@ Validated the ticket, completed the bundle dry-run, and uploaded TINYIDP ADMIN C
 
 - /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/ttmp/2026/07/23/TINYIDP-ADMIN-CONSOLE-001--design-the-tinyidp-administration-backend-and-widget-dsl-console-mvp/reference/01-investigation-diary.md — Validation and delivery evidence
 - /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/ttmp/2026/07/23/TINYIDP-ADMIN-CONSOLE-001--design-the-tinyidp-administration-backend-and-widget-dsl-console-mvp/tasks.md — Documentation delivery tasks completed
-

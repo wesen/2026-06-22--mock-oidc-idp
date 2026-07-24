@@ -22,8 +22,24 @@ RelatedFiles:
       Note: Evidence for public and internal listener boundaries
     - Path: repo://pkg/idp/audit.go
       Note: Evidence for post-commit delivery semantics
+    - Path: repo://pkg/idpadmin/action_handle.go
+      Note: Short-lived signed and session-bound action authority
+    - Path: repo://pkg/idpadmin/model.go
+      Note: Administration scopes, capabilities, principals, grants, and server-side authorization
+    - Path: repo://pkg/idpadmin/model_test.go
+      Note: Authorization and action-handle security tests
+    - Path: repo://pkg/idpadminstore/store.go
+      Note: Control-plane persistence and cross-domain transaction contracts
     - Path: repo://pkg/idpstore/interfaces.go
       Note: Evidence for point queries and atomic mutations
+    - Path: repo://pkg/sqlitestore/admin_store.go
+      Note: SQLite implementation of administration security state and atomic updates
+    - Path: repo://pkg/sqlitestore/admin_store_test.go
+      Note: Grant, rollback, replay, and CAS persistence tests
+    - Path: repo://pkg/sqlitestore/migrations/016_admin_control_plane.sql
+      Note: Durable administration control-plane schema
+    - Path: repo://pkg/sqlitestore/migrations/017_admin_user_projection.sql
+      Note: Indexed administration user query projection
     - Path: repo://ttmp/2026/07/23/TINYIDP-ADMIN-CONSOLE-001--design-the-tinyidp-administration-backend-and-widget-dsl-console-mvp/sources/local/tiny-idp-ux.md
       Note: Imported source read in full
 ExternalSources: []
@@ -32,6 +48,7 @@ LastUpdated: 2026-07-23T20:14:57.931345362-04:00
 WhatFor: Preserve how the administration-backend proposal was derived, including concrete evidence, failed assumptions, and review instructions.
 WhenToUse: Read when reviewing the design, implementing a phase, or continuing the investigation.
 ---
+
 
 
 # Investigation diary
@@ -351,4 +368,220 @@ remarquee upload bundle <design.md> <diary.md> <source.md> \
   --remote-dir "/ai/2026/07/23/TINYIDP-ADMIN-CONSOLE-001" \
   --toc-depth 2 \
   --non-interactive
+```
+
+## Step 4: Start implementation on an isolated feature branch
+
+Implementation began by turning the accepted design into the repository's working plan, auditing the worktree, and isolating the work on `feat/tinyidp-admin-console`. The documentation baseline and an unrelated already-present Jitsi ticket were committed separately so later implementation commits can be reviewed and reverted independently.
+
+Two path assumptions failed during the audit. They were corrected by asking Git and `rg` for authoritative paths rather than continuing from remembered paths. The first attempt to create the branch was also rejected by the filesystem sandbox because this linked worktree stores Git metadata outside the writable workspace; after the user explicitly authorized switching branches, the same operation succeeded with approved access.
+
+### Prompt Context
+
+**User prompt (verbatim):** `implement the ticket, keep a detailed diary as you work, commit at appropriate intervals.`
+
+**Assistant interpretation:** Implement the complete phased administration-console ticket, maintain a chronological engineering diary with commands and failures, and create reviewable commits at coherent boundaries.
+
+**Inferred user intent:** Produce working, tested production code—not another planning artifact—while preserving enough evidence for an intern or reviewer to understand every architectural and implementation decision.
+
+### What I did
+
+- Audited the current branch and untracked ticket directories.
+- Attempted to create `feat/tinyidp-admin-console`; recorded the sandbox failure instead of bypassing it.
+- Resolved the real checkout root and Git metadata location.
+- Created `feat/tinyidp-admin-console` after explicit user authorization.
+- Committed the administration-console ticket as `ca9146f`.
+- Inspected and separately committed the pre-existing Jitsi deployment ticket as `d707119`.
+- Began resolving the current `idpstore` and `sqlitestore` APIs and migration layout for Phase A.
+
+### Why
+
+- A dedicated branch prevents this multi-phase implementation from extending the unrelated Jitsi feature branch.
+- Separate ticket commits keep two independently authored documentation packages independently reviewable.
+- Phase A must be based on the actual store interfaces and migration mechanism because authorization, action replay protection, and protocol mutations must share a real SQLite transaction.
+
+### What worked
+
+- The user explicitly authorized the branch operation.
+- The branch and both commits completed successfully.
+- The pre-commit hook ran and correctly skipped code checks for documentation-only commits.
+- `rg --files` found the actual source tree and showed that migrations currently end at `015_integration_transactions.sql`.
+
+### What didn't work
+
+- A remembered test-suite filename was wrong:
+
+  ```text
+  sed: can't read pkg/sqlitestore/testsuite.go: No such file or directory
+  ```
+
+  The suite is `pkg/idpstore/testsuite.go`.
+
+- The first branch operation failed because linked-worktree Git metadata is outside the writable sandbox:
+
+  ```text
+  fatal: cannot lock ref 'refs/heads/feat/tinyidp-admin-console': Unable to create '/home/manuel/code/wesen/go-go-golems/tiny-idp/.git/refs/heads/feat/tinyidp-admin-console.lock': Read-only file system
+  ```
+
+- The initial resumed inspection used a duplicated `tiny-idp/tiny-idp` path. A later command ran from the workspace aggregator rather than a Git checkout and reported:
+
+  ```text
+  fatal: not a git repository (or any of the parent directories): .git
+  ```
+
+  The correct checkout root is `/home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp`.
+
+### What I learned
+
+- This checkout is a linked Git worktree whose metadata is at `/home/manuel/code/wesen/go-go-golems/tiny-idp/.git/worktrees/tiny-idp`.
+- The workspace parent contains several repositories, so every source and Git command must name the TinyIDP checkout explicitly.
+- The existing migration sequence is contiguous through version 15, making versions 16 and 17 available for the control-plane schema and read projection.
+
+### What was tricky to build
+
+- The boundary between a reversible Git operation and sandbox authority was operationally subtle: the requested implementation implied commits, but the environment still required explicit authority to write external linked-worktree metadata.
+- The workspace and repository share the name `tiny-idp` at adjacent levels, which made a plausible but invalid doubled path easy to construct.
+
+### What warrants a second pair of eyes
+
+- Confirm whether the unrelated Jitsi ticket is expected on this feature branch long-term or should later be moved/cherry-picked elsewhere.
+- Review the first Phase A commit particularly for transaction ownership and whether all security records share the protocol mutation transaction.
+
+### What should be done in the future
+
+- Use `git rev-parse --show-toplevel` from the candidate checkout before any multi-command workflow.
+- Keep implementation commits scoped by phase or security invariant rather than by arbitrary elapsed time.
+
+### Code review instructions
+
+- Review `ca9146f` as the administration design baseline.
+- Review `d707119` independently as the Jitsi ticket capture.
+- Confirm `git status --short` before each implementation commit so no other workspace ticket is staged accidentally.
+
+### Technical details
+
+The branch boundary is:
+
+```text
+feat/tinyidp-plugin-jitsi
+    |
+    +-- ca9146f docs(ticket): design tinyidp administration console MVP
+    |
+    +-- d707119 docs(ticket): analyze Jitsi k3s deployment boundary
+         HEAD -> feat/tinyidp-admin-console
+```
+
+## Step 5: Implement the control-plane security and persistence foundation
+
+The first production-code slice establishes the security vocabulary and durable invariants on which every later HTTP, Widget DSL, and React feature depends. `pkg/idpadmin` now owns closed scopes and capabilities, principals, grants, server-side authorization, and short-lived signed action handles. `pkg/idpadminstore` defines the persistence boundary, while SQLite migrations 16 and 17 and `admin_store.go` make grants, sessions, replay prevention, resource versions, idempotency, actions, and the audit outbox durable.
+
+This slice deliberately stops below HTTP and UI. It proves that presentation code cannot mint authority, a stale grant version cannot authorize a request, a handle cannot move between sessions, a nonce cannot be consumed twice, and protocol data plus control-plane evidence can commit or roll back in one SQLite transaction.
+
+### Prompt Context
+
+**User prompt (verbatim):** (same as Step 4)
+
+**Assistant interpretation:** Begin with the Phase A security and transaction substrate, verify it independently, and commit it before adding application services or transport.
+
+**Inferred user intent:** Make later console work safe by construction and leave an evidence-backed trail for intern implementation and review.
+
+### What I did
+
+- Added `pkg/idpadmin`:
+  - MVP system scope validation with a reserved future domain shape;
+  - a closed capability vocabulary;
+  - authenticated and fresh principal assurance;
+  - versioned, revocable grants;
+  - a store-backed authorizer that revalidates every security input;
+  - HMAC-SHA-256 action handles capped at five minutes.
+- Added `pkg/idpadminstore` contracts for grants, admin sessions, action nonces, resource versions, idempotency records, action records, audit outbox rows, and cross-domain atomic updates.
+- Added migrations:
+  - `016_admin_control_plane.sql`;
+  - `017_admin_user_projection.sql`.
+- Added a concrete SQLite implementation and compile-time interface assertion.
+- Added unit and SQLite transaction tests.
+
+### Why
+
+- Widget action metadata is untrusted presentation data unless Go signs and revalidates it.
+- Grant revocation and capability changes must invalidate already-rendered action handles.
+- Replay prevention, CAS, the domain mutation, action evidence, and audit outbox insertion need one transaction owner.
+- A query projection is required before the console can support stable, indexed pagination at production user counts.
+
+### What worked
+
+- `go test ./pkg/idpadmin` passed after the initial model implementation.
+- With a task-local Go cache, the complete focused verification passed:
+
+  ```text
+  ok  	github.com/go-go-golems/tiny-idp/pkg/idpadmin
+  ?   	github.com/go-go-golems/tiny-idp/pkg/idpadminstore	[no test files]
+  ok  	github.com/go-go-golems/tiny-idp/pkg/sqlitestore
+  ```
+
+- Migration discovery automatically recognized versions 16 and 17.
+- The SQLite test proves `AdminUpdate` rolls an `idpstore.User` and an `idpadmin.Grant` back together.
+- Tests prove handle tampering, expiration, subject/session binding, stale grant version, fresh-auth expiry, nonce replay, single active owner, and resource-version CAS.
+
+### What didn't work
+
+- The first combined test used the default global Go cache, which is read-only in this sandbox:
+
+  ```text
+  open /home/manuel/.cache/go-build/aa/aa822a343921883b031b37a186b18f774e758f4d56238ba134b1726f1a1937a9-d: read-only file system
+  ```
+
+  `pkg/sqlitestore` still passed in that run. Re-running with `GOCACHE=/tmp/tinyidp-admin-go-cache` made all focused packages pass.
+
+- The first invitation-metadata migration draft referenced `durable_invitations(id)`, but the existing table is keyed only by `code_hash`. Inspection caught the mismatch before commit; the invalid foreign key was removed.
+
+### What I learned
+
+- Existing migrations serialize durable invitations into a `data` blob and expose no stable relational invitation ID. Admin display metadata must remain independently keyed until invitation storage is deliberately remodeled in Phase D.
+- The concrete SQLite store can implement `AdminUpdate` without weakening the existing public `idpstore.TxStore`: one scoped `*Store` safely satisfies both callback interfaces.
+- An active-owner partial unique index enforces the single-owner bootstrap invariant at the database boundary.
+
+### What was tricky to build
+
+- Signed handles must reject unknown JSON fields and impossible validity windows as well as invalid signatures; otherwise future schema drift could silently weaken interpretation.
+- A failed conditional revoke can mean “missing” or “stale.” The implementation performs a follow-up existence check so callers receive `ErrGrantNotFound` or `ErrVersionConflict` rather than an ambiguous result.
+- SQL nullable nanosecond timestamps need careful conversion so `nil` retains lifecycle meaning.
+
+### What warrants a second pair of eyes
+
+- Review the capability list before it becomes part of persisted grant JSON.
+- Review whether the owner uniqueness rule should ignore expired grants as well as revoked grants; SQLite partial indexes cannot use the current clock, so owner replacement currently requires explicit revocation.
+- Review action/idempotency retention and cleanup indexes before Phase E workers are implemented.
+- Review the user projection population strategy; this commit creates the schema but does not yet add synchronization triggers or rebuild code.
+
+### What should be done in the future
+
+- Add the Phase A query and command application contracts and owner grant CLI.
+- Add a first-class resource-version initializer rather than seeding rows from tests or migration/rebuild code.
+- Implement outbox dequeue/delivery and expiration maintenance with bounded batches.
+
+### Code review instructions
+
+- Start at `pkg/idpadmin/model.go`, then follow authorization inputs into `action_handle.go`.
+- Inspect `pkg/idpadminstore/store.go` before `pkg/sqlitestore/admin_store.go` to understand the intended boundary.
+- Read both migrations before reviewing SQL methods.
+- Run:
+
+  ```text
+  GOCACHE=/tmp/tinyidp-admin-go-cache go test ./pkg/idpadmin ./pkg/idpadminstore ./pkg/sqlitestore
+  ```
+
+### Technical details
+
+The atomic mutation boundary is:
+
+```go
+AdminUpdate(ctx, func(protocol idpstore.TxStore, admin idpadminstore.TxStore) error {
+    // 1. consume action nonce
+    // 2. compare and increment aggregate version
+    // 3. mutate protocol/domain state
+    // 4. insert admin action evidence
+    // 5. enqueue audit event
+    return nil // one commit, or one rollback
+})
 ```
