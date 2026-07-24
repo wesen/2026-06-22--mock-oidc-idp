@@ -90,6 +90,7 @@ Example:
     --db /var/lib/tinyidp/idp.db --audit-path /var/log/tinyidp/audit.jsonl \
     --token-secret-file /run/secrets/tinyidp-token \
     --admin-auth-key-file /run/secrets/tinyidp-admin-auth \
+    --admin-action-key-file /run/secrets/tinyidp-admin-actions \
     --clients-file /etc/tinyidp/catalog/clients.json \
     --theme-dir /etc/tinyidp/themes \
     --theme-catalog-file /etc/tinyidp/themes/themes.json \
@@ -150,6 +151,11 @@ func runProductionHost(ctx context.Context, settings *productionsection.Settings
 	if len(adminAuthKey) != 32 {
 		return fmt.Errorf("admin auth key file must contain exactly 32 bytes")
 	}
+	adminActionKey, err := readOwnerOnlyFile(settings.AdminActionKeyFile, "admin action key", 32)
+	if err != nil {
+		return err
+	}
+	defer clearProductionSecret(adminActionKey)
 	signupSource, err := readProductionSignupProgram(settings.SignupProgramFile)
 	if err != nil {
 		return err
@@ -341,6 +347,39 @@ func runProductionHost(ctx context.Context, settings *productionsection.Settings
 		_ = store.Close()
 		return err
 	}
+	adminHandles, err := idpadmin.NewHandleService(adminActionKey, 5*time.Minute, time.Now)
+	clearProductionSecret(adminActionKey)
+	if err != nil {
+		_ = provider.Close(context.Background())
+		_ = signupManager.Close(context.Background())
+		_ = audit.Close()
+		_ = store.Close()
+		return err
+	}
+	adminExecutor, err := idpadminapp.NewExecutor(store, adminHandles, adminAuthorizer, time.Now)
+	if err != nil {
+		_ = provider.Close(context.Background())
+		_ = signupManager.Close(context.Background())
+		_ = audit.Close()
+		_ = store.Close()
+		return err
+	}
+	adminActions, err := idpadminapp.NewActionService(store, adminHandles, adminAuthorizer, time.Now)
+	if err != nil {
+		_ = provider.Close(context.Background())
+		_ = signupManager.Close(context.Background())
+		_ = audit.Close()
+		_ = store.Close()
+		return err
+	}
+	adminUsers, err := idpadminapp.NewUserCommandService(store, adminExecutor, idpaccounts.Options{}, time.Now)
+	if err != nil {
+		_ = provider.Close(context.Background())
+		_ = signupManager.Close(context.Background())
+		_ = audit.Close()
+		_ = store.Close()
+		return err
+	}
 	adminPages, err := idpadminapp.NewPageDataService(store, adminAuthorizer, time.Now)
 	if err != nil {
 		_ = provider.Close(context.Background())
@@ -359,6 +398,7 @@ func runProductionHost(ctx context.Context, settings *productionsection.Settings
 	}
 	publicAdminHandler, err := adminweb.NewHandler(adminweb.HandlerConfig{
 		Auth: adminAuth, Pages: adminPages, Widgets: adminWidgets,
+		Actions: adminActions, Users: adminUsers,
 		SPA: adminweb.SPAHandler(), Assets: adminweb.AssetsHandler(),
 	})
 	if err != nil {

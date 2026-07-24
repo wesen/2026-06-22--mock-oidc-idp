@@ -27,6 +27,7 @@ type Settings struct {
 	AuditPath               string   `glazed:"audit-path"`
 	TokenSecretFile         string   `glazed:"token-secret-file"`
 	AdminAuthKeyFile        string   `glazed:"admin-auth-key-file"`
+	AdminActionKeyFile      string   `glazed:"admin-action-key-file"`
 	InvitationKeyFile       string   `glazed:"invitation-lookup-key-file"`
 	EmailChallengeKeyFile   string   `glazed:"email-challenge-key-file"`
 	EmailSMTPAddress        string   `glazed:"email-smtp-address"`
@@ -73,6 +74,7 @@ func NewSection() (schema.Section, error) {
 			fields.New("audit-path", fields.TypeString, fields.WithRequired(true), fields.WithHelp("Synchronous JSONL audit path")),
 			fields.New("token-secret-file", fields.TypeString, fields.WithRequired(true), fields.WithHelp("Owner-only file containing at least 32 random bytes")),
 			fields.New("admin-auth-key-file", fields.TypeString, fields.WithRequired(true), fields.WithHelp("Owner-only file containing exactly 32 random bytes for administration sessions")),
+			fields.New("admin-action-key-file", fields.TypeString, fields.WithRequired(true), fields.WithHelp("Owner-only file containing at least 32 random bytes for administration action handles")),
 			fields.New("invitation-lookup-key-file", fields.TypeString, fields.WithHelp("Owner-only 32-byte HMAC key; required when the signup program declares a durable invitation provider")),
 			fields.New("email-challenge-key-file", fields.TypeString, fields.WithHelp("Owner-only 32-byte HMAC key; required when the signup program declares an email challenge")),
 			fields.New("email-smtp-address", fields.TypeString, fields.WithHelp("SMTP submission host:port; required for email-challenge signup")),

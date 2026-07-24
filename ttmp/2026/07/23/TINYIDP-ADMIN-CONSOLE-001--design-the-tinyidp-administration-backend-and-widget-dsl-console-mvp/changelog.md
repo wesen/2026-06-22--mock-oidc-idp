@@ -8,6 +8,7 @@
 - Completed Phase A with typed safe query/command contracts, a separate application orchestration layer, Glazed owner lifecycle commands, deterministic user-projection rebuild/drift checks, and an atomic mutation executor.
 - Started Phase B with the required Widget DSL dependency and a tested OIDC PKCE/admin-session authentication boundary.
 - Completed Phase B with typed read models, a constrained Widget DSL runtime, public admin routing, in-process OIDC discovery, exact-key session configuration, embedded React/Redux/RTK Query/Bootstrap assets, and frontend CI reproducibility checks.
+- Completed Phase C with command-specific capabilities, signed server-prepared actions, transaction-safe user lifecycle commands, reason/confirmation/fresh-auth/version/idempotency enforcement, audit-pending result semantics, shared CLI execution, first-owner atomic provisioning, and React user-operation forms.
 
 ## 2026-07-23
 

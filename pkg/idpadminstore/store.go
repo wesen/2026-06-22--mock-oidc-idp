@@ -44,20 +44,26 @@ type AuthAttempt struct {
 }
 
 type Action struct {
-	ID              string
-	Nonce           string
-	Subject         string
-	GrantID         string
-	GrantVersion    int64
-	Capability      idpadmin.Capability
-	Command         string
-	TargetType      string
-	TargetID        string
-	ExpectedVersion int64
-	Status          string
-	ErrorCode       string
-	CreatedAt       time.Time
-	CompletedAt     *time.Time
+	ID               string
+	RequestID        string
+	SessionBinding   string
+	Nonce            string
+	Subject          string
+	GrantID          string
+	GrantVersion     int64
+	Scope            idpadmin.AdminScope
+	Capability       idpadmin.Capability
+	Command          string
+	TargetType       string
+	TargetID         string
+	ExpectedVersion  int64
+	ResultingVersion int64
+	Reason           string
+	Assurance        idpadmin.Assurance
+	Status           string
+	ErrorCode        string
+	CreatedAt        time.Time
+	CompletedAt      *time.Time
 }
 
 type IdempotencyRecord struct {
@@ -111,6 +117,7 @@ type AuthAttemptStore interface {
 type SecurityStore interface {
 	CreateActionNonce(ctx context.Context, nonce, sessionID string, expiresAt time.Time) error
 	ConsumeActionNonce(ctx context.Context, nonce, sessionID string, now time.Time) error
+	CreateResourceVersion(ctx context.Context, resourceType, resourceID string, version int64, now time.Time) error
 	GetResourceVersion(ctx context.Context, resourceType, resourceID string) (int64, error)
 	CompareAndIncrementResourceVersion(ctx context.Context, resourceType, resourceID string, expected int64, now time.Time) (int64, error)
 	PutIdempotencyRecord(ctx context.Context, record IdempotencyRecord) error
@@ -137,10 +144,17 @@ type ProjectionStore interface {
 
 type ReadModelStore interface {
 	GetAdminOverview(ctx context.Context, now time.Time) (idpadmin.Overview, error)
+	GetAdminUser(ctx context.Context, userID string) (idpadmin.UserRow, error)
 	ListAdminUsers(ctx context.Context, filter idpadmin.UserFilter, limit int) ([]idpadmin.UserRow, error)
 	ListAdminActivity(ctx context.Context, limit int) ([]idpadmin.ActivityRow, error)
 	ListAdminOperations(ctx context.Context, limit int) (idpadmin.OperationsView, error)
 	ListAdminInvitations(ctx context.Context, now time.Time, limit int) ([]idpadmin.InvitationRow, error)
+}
+
+// UserProjectionTx refreshes one derived user row inside the same transaction
+// as its protocol mutation.
+type UserProjectionTx interface {
+	RefreshAdminUserProjection(ctx context.Context, userID string, now time.Time) error
 }
 
 type Store interface {

@@ -25,9 +25,9 @@
 
 ## Phase C — User operations
 
-- [ ] Migrate CLI user operations to `pkg/idpadmin`.
-- [ ] Add create/edit/enable/disable/unlock/set-password/revoke-access flows.
-- [ ] Add fresh-auth, typed confirmation, expected-version, replay, and stale-state tests.
+- [x] Migrate CLI user operations to `pkg/idpadmin`.
+- [x] Add create/edit/enable/disable/unlock/set-password/revoke-access flows.
+- [x] Add fresh-auth, typed confirmation, expected-version, replay, and stale-state tests.
 
 ## Phase D — Invitations and applications
 

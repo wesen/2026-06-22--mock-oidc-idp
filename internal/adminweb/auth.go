@@ -167,6 +167,18 @@ func (v *oidcIdentityVerifier) Verify(ctx context.Context, rawIDToken string) (V
 }
 
 func (m *AuthManager) LoginHandler(writer http.ResponseWriter, request *http.Request) {
+	m.startLogin(writer, request, false)
+}
+
+func (m *AuthManager) ReauthHandler(writer http.ResponseWriter, request *http.Request) {
+	if _, ok := Principal(request.Context()); !ok {
+		writeJSONError(writer, http.StatusUnauthorized, "authentication_required")
+		return
+	}
+	m.startLogin(writer, request, true)
+}
+
+func (m *AuthManager) startLogin(writer http.ResponseWriter, request *http.Request, force bool) {
 	returnPath, err := safeReturnPath(request.URL.Query().Get("return"))
 	if err != nil {
 		http.Error(writer, "invalid return path", http.StatusBadRequest)
@@ -212,11 +224,18 @@ func (m *AuthManager) LoginHandler(writer http.ResponseWriter, request *http.Req
 		Secure: m.secure, SameSite: http.SameSiteLaxMode, MaxAge: int(m.attemptTTL.Seconds()),
 	})
 	challenge := base64.RawURLEncoding.EncodeToString(sha256Sum(verifier))
-	http.Redirect(writer, request, m.oauth.AuthCodeURL(
-		state, oauth2.SetAuthURLParam("nonce", nonce),
+	options := []oauth2.AuthCodeOption{
+		oauth2.SetAuthURLParam("nonce", nonce),
 		oauth2.SetAuthURLParam("code_challenge", challenge),
 		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
-	), http.StatusFound)
+	}
+	if force {
+		options = append(options,
+			oauth2.SetAuthURLParam("prompt", "login"),
+			oauth2.SetAuthURLParam("max_age", "0"),
+		)
+	}
+	http.Redirect(writer, request, m.oauth.AuthCodeURL(state, options...), http.StatusFound)
 }
 
 func (m *AuthManager) CallbackHandler(writer http.ResponseWriter, request *http.Request) {
@@ -386,7 +405,8 @@ func (m *AuthManager) principal(request *http.Request) (idpadmin.AdminPrincipal,
 		assurance = idpadmin.AssuranceFresh
 	}
 	return idpadmin.AdminPrincipal{
-		Subject: session.Subject, SessionID: cookie.Value,
+		Subject:       session.Subject,
+		SessionID:     base64.RawURLEncoding.EncodeToString(m.hash("session", cookie.Value)),
 		Authenticated: session.AuthenticatedAt, Assurance: assurance,
 		GrantID: session.GrantID, GrantVersion: session.GrantVersion,
 	}, session, nil

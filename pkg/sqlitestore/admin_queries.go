@@ -3,11 +3,13 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/go-go-golems/tiny-idp/pkg/idpadmin"
+	"github.com/go-go-golems/tiny-idp/pkg/idpadminstore"
 	"github.com/go-go-golems/tiny-idp/pkg/idpstore"
 )
 
@@ -41,6 +43,32 @@ func (s *Store) GetAdminOverview(ctx context.Context, now time.Time) (idpadmin.O
 	}
 	overview.SchemaVersion, err = s.SchemaVersion(ctx)
 	return overview, err
+}
+
+func (s *Store) GetAdminUser(ctx context.Context, userID string) (idpadmin.UserRow, error) {
+	var row idpadmin.UserRow
+	var locked, lastLogin sql.NullInt64
+	var created, updated int64
+	err := s.conn().QueryRowContext(ctx, `
+		SELECT user_id, subject, login, email, display_name, disabled, locked_until_ns,
+		       last_successful_login_at_ns, active_session_count, active_grant_count,
+		       created_at_ns, updated_at_ns, version
+		FROM admin_user_projection WHERE user_id=?`, userID).Scan(
+		&row.ID, &row.Subject, &row.Login, &row.Email, &row.DisplayName, &row.Disabled,
+		&locked, &lastLogin, &row.ActiveSessionCount, &row.ActiveGrantCount,
+		&created, &updated, &row.Version,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return idpadmin.UserRow{}, idpadminstore.ErrNotFound
+	}
+	if err != nil {
+		return idpadmin.UserRow{}, err
+	}
+	row.LockedUntil = timePointer(locked)
+	row.LastSuccessfulLoginAt = timePointer(lastLogin)
+	row.CreatedAt = time.Unix(0, created).UTC()
+	row.UpdatedAt = time.Unix(0, updated).UTC()
+	return row, nil
 }
 
 func (s *Store) ListAdminUsers(ctx context.Context, filter idpadmin.UserFilter, limit int) ([]idpadmin.UserRow, error) {

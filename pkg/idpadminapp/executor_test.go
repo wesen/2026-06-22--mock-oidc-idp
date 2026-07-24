@@ -26,7 +26,7 @@ func TestExecutorCommitsMutationEvidenceAndIdempotencyAtomically(t *testing.T) {
 	principal := executorPrincipal(now)
 	raw, err := handles.Mint(idpadmin.ActionClaims{
 		SessionID: principal.SessionID, Subject: principal.Subject, GrantID: grant.ID,
-		GrantVersion: grant.Version, Scope: grant.Scope, Capability: idpadmin.CapabilityUsersWrite,
+		GrantVersion: grant.Version, Scope: grant.Scope, Capability: idpadmin.CapabilityUsersUpdate,
 		Command: "users.update", TargetType: "user", TargetID: "user-1", ExpectedVersion: 4,
 	})
 	require.NoError(t, err)
@@ -75,7 +75,7 @@ func TestExecutorRollbackPreservesNonceWhenCASIsStale(t *testing.T) {
 	principal := executorPrincipal(now)
 	raw, err := handles.Mint(idpadmin.ActionClaims{
 		SessionID: principal.SessionID, Subject: principal.Subject, GrantID: grant.ID,
-		GrantVersion: grant.Version, Scope: grant.Scope, Capability: idpadmin.CapabilityUsersWrite,
+		GrantVersion: grant.Version, Scope: grant.Scope, Capability: idpadmin.CapabilityUsersDisable,
 		Command: "users.disable", TargetType: "user", TargetID: "user-1", ExpectedVersion: 1,
 	})
 	require.NoError(t, err)

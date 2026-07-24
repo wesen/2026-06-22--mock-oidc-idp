@@ -26,8 +26,10 @@ type ExecutionPolicy struct {
 type ExecutionRequest struct {
 	Handle         string
 	Principal      idpadmin.AdminPrincipal
+	RequestID      string
 	IdempotencyKey string
 	RequestHash    []byte
+	Reason         string
 	Policy         ExecutionPolicy
 }
 
@@ -63,14 +65,8 @@ func (e *Executor) Execute(ctx context.Context, request ExecutionRequest, mutate
 	if strings.TrimSpace(request.IdempotencyKey) == "" || len(request.RequestHash) < 16 {
 		return nil, ErrIdempotencyRequired
 	}
-	claims, err := e.handles.Verify(request.Handle, request.Principal)
+	claims, err := e.Preflight(ctx, request)
 	if err != nil {
-		return nil, err
-	}
-	if _, err := e.authorizer.Authorize(
-		ctx, request.Principal, claims.GrantID, claims.GrantVersion, claims.Scope,
-		claims.Capability, claims.RequireFresh,
-	); err != nil {
 		return nil, err
 	}
 	actionID, err := e.id()
@@ -79,6 +75,7 @@ func (e *Executor) Execute(ctx context.Context, request ExecutionRequest, mutate
 	}
 	now := e.now().UTC()
 	var response []byte
+	var resultingVersion int64
 	err = e.store.AdminUpdate(ctx, func(protocol idpstore.TxStore, admin idpadminstore.TxStore) error {
 		previous, err := admin.GetIdempotencyRecord(ctx, request.Principal.Subject, request.IdempotencyKey)
 		switch {
@@ -98,9 +95,10 @@ func (e *Executor) Execute(ctx context.Context, request ExecutionRequest, mutate
 			return err
 		}
 		if claims.ExpectedVersion > 0 {
-			if _, err := admin.CompareAndIncrementResourceVersion(
+			resultingVersion, err = admin.CompareAndIncrementResourceVersion(
 				ctx, claims.TargetType, claims.TargetID, claims.ExpectedVersion, now,
-			); err != nil {
+			)
+			if err != nil {
 				return err
 			}
 		}
@@ -108,17 +106,35 @@ func (e *Executor) Execute(ctx context.Context, request ExecutionRequest, mutate
 		if err != nil {
 			return err
 		}
+		if resultingVersion == 0 && claims.TargetType != "" && claims.TargetID != "" {
+			resultingVersion, err = admin.GetResourceVersion(ctx, claims.TargetType, claims.TargetID)
+			if err != nil && !errors.Is(err, idpadminstore.ErrNotFound) {
+				return err
+			}
+			if errors.Is(err, idpadminstore.ErrNotFound) {
+				resultingVersion = 0
+			}
+		}
 		if err := admin.InsertAdminAction(ctx, idpadminstore.Action{
-			ID: actionID, Nonce: claims.Nonce, Subject: claims.Subject, GrantID: claims.GrantID,
-			GrantVersion: claims.GrantVersion, Capability: claims.Capability, Command: claims.Command,
+			ID: actionID, RequestID: request.RequestID, SessionBinding: claims.SessionID,
+			Nonce: claims.Nonce, Subject: claims.Subject, GrantID: claims.GrantID,
+			GrantVersion: claims.GrantVersion, Scope: claims.Scope,
+			Capability: claims.Capability, Command: claims.Command,
 			TargetType: claims.TargetType, TargetID: claims.TargetID, ExpectedVersion: claims.ExpectedVersion,
-			Status: "succeeded", CreatedAt: now, CompletedAt: &now,
+			ResultingVersion: resultingVersion, Reason: request.Reason,
+			Assurance: request.Principal.Assurance,
+			Status:    "succeeded", CreatedAt: now, CompletedAt: &now,
 		}); err != nil {
 			return pkgerrors.Wrap(err, "insert admin action")
 		}
 		auditPayload, err := json.Marshal(map[string]any{
-			"action_id": actionID, "command": claims.Command, "subject": claims.Subject,
-			"target_type": claims.TargetType, "target_id": claims.TargetID, "result": "accepted",
+			"action_id": actionID, "request_id": request.RequestID,
+			"command": claims.Command, "subject": claims.Subject,
+			"scope": claims.Scope, "capability": claims.Capability,
+			"target_type": claims.TargetType, "target_id": claims.TargetID,
+			"expected_version": claims.ExpectedVersion, "resulting_version": resultingVersion,
+			"operator_reason": request.Reason, "assurance": request.Principal.Assurance,
+			"result": "accepted",
 		})
 		if err != nil {
 			return pkgerrors.Wrap(err, "encode audit outbox payload")
@@ -146,4 +162,21 @@ func (e *Executor) Execute(ctx context.Context, request ExecutionRequest, mutate
 		return nil, err
 	}
 	return response, nil
+}
+
+// Preflight authenticates the immutable handle envelope and reloads its
+// current grant before expensive request preparation such as password hashing.
+// Execute repeats this check immediately before opening the transaction.
+func (e *Executor) Preflight(ctx context.Context, request ExecutionRequest) (idpadmin.ActionClaims, error) {
+	claims, err := e.handles.Verify(request.Handle, request.Principal)
+	if err != nil {
+		return idpadmin.ActionClaims{}, err
+	}
+	if _, err := e.authorizer.Authorize(
+		ctx, request.Principal, claims.GrantID, claims.GrantVersion, claims.Scope,
+		claims.Capability, claims.RequireFresh,
+	); err != nil {
+		return idpadmin.ActionClaims{}, err
+	}
+	return claims, nil
 }

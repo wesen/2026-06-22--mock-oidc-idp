@@ -4,6 +4,7 @@ import {
   defaultWidgetRegistry,
 } from "@go-go-golems/rag-evaluation-site";
 import { useSessionQuery, useWidgetPageQuery } from "./api";
+import { UserManagement } from "./UserManagement";
 
 const pages = [
   ["overview", "Overview"],
@@ -72,6 +73,7 @@ export function App() {
         {widget.data && (
           <WidgetRenderer node={widget.data.root} registry={defaultWidgetRegistry} />
         )}
+        {page === "users" && <UserManagement session={session.data} />}
       </main>
       <WidgetToastRegion />
     </div>

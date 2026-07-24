@@ -2,6 +2,7 @@ package cmds
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -61,6 +62,40 @@ func TestAdminConsoleBootstrapStatusAndRevokeCommands(t *testing.T) {
 	processor = &captureProcessor{}
 	require.NoError(t, status.RunIntoGlazeProcessor(ctx, values.New(), processor))
 	require.Equal(t, false, anyRowVal(processor.rows[0], "configured"))
+}
+
+func TestAdminConsoleBootstrapAtomicallyProvisionsFirstOwner(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "tinyidp.sqlite")
+	passwordPath := filepath.Join(t.TempDir(), "owner-password")
+	require.NoError(t, os.WriteFile(passwordPath, []byte("correct horse battery staple\n"), 0o600))
+	now := time.Date(2026, time.July, 24, 14, 0, 0, 0, time.UTC)
+	bootstrap, err := newAdminConsoleBootstrapCommand(&dbPath)
+	require.NoError(t, err)
+	bootstrap.now = func() time.Time { return now }
+	bootstrapValues := values.New()
+	require.NoError(t, cmd_sources.Execute(bootstrap.Schema, bootstrapValues, cmd_sources.FromMap(map[string]map[string]any{
+		"default": {
+			"owner-login": "owner", "owner-password-file": passwordPath,
+			"owner-email": "owner@example.test", "owner-display-name": "Installation Owner",
+			"public-base-url": "https://id.example",
+		},
+	})))
+	processor := &captureProcessor{}
+	require.NoError(t, bootstrap.RunIntoGlazeProcessor(ctx, bootstrapValues, processor))
+
+	store, err := sqlitestore.Open(ctx, sqlitestore.DefaultConfig(dbPath))
+	require.NoError(t, err)
+	defer store.Close()
+	owner, err := store.GetUserByLogin(ctx, "owner")
+	require.NoError(t, err)
+	require.Equal(t, "owner@example.test", owner.Email)
+	credential, err := store.GetPasswordCredentialByUserID(ctx, owner.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, credential.PasswordHash)
+	grant, err := store.GetActiveSystemOwner(ctx, now)
+	require.NoError(t, err)
+	require.Equal(t, owner.Sub, grant.ActorSubject)
 }
 
 func anyRowVal(row types.Row, key string) any {

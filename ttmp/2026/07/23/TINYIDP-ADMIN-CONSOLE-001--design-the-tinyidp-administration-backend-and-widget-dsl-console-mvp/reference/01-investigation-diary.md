@@ -1154,3 +1154,300 @@ browser GET /api/widget/pages/users
   -> WidgetPageResponse JSON
   -> React WidgetRenderer
 ```
+
+## Step 9: Implement guarded user mutations
+
+Phase C replaces the read-only action stub with a single guarded mutation
+pipeline shared by HTTP and the operator CLI. The implementation deliberately
+does not add resource-specific CRUD endpoints. The server prepares a
+short-lived signed action, persists its one-use nonce, and later treats the
+handle—not browser fields—as the authority for command, target, capability,
+scope, expected version, session binding, and freshness.
+
+### Prompt Context
+
+**User prompt (verbatim):** (automatic continuation of the implementation
+goal)
+
+**Assistant interpretation:** Continue through the next complete ticket phase,
+preserve a detailed failure/decision record, and commit only a coherent tested
+boundary.
+
+**Inferred user intent:** Turn the Phase A security substrate into real user
+operations without allowing the web layer or old CLI services to bypass it.
+
+### What I did
+
+- Replaced the coarse `users.write` and similar aggregate permissions with the
+  command-level capability vocabulary specified by the design:
+  `users.create`, `users.update`, `users.disable`, `users.password.set`,
+  `users.unlock`, and `users.access.revoke`, plus the corresponding explicit
+  invitation, client, key, and operation capabilities needed by later phases.
+- Added `idpadminapp.ActionService`, a closed command registry that:
+  - maps each command to one capability and target type;
+  - reloads and authorizes the current grant;
+  - obtains the authoritative current resource version;
+  - generates create-user IDs on the server;
+  - signs a five-minute session/subject/grant/scope/version-bound handle;
+  - stores the nonce before returning the handle;
+  - reports reason, confirmation, and fresh-auth requirements as presentation
+    metadata.
+- Added `idpadminapp.UserCommandService` for create, edit, enable, disable,
+  unlock, set-password, and revoke-access.
+- Added transaction-scoped store operations for:
+  - user security-artifact revocation;
+  - resource-version initialization;
+  - one-user projection refresh;
+  - safe projected-user lookup.
+- Added `idpaccounts.PreparePassword`, so Argon password work finishes before
+  the SQLite write transaction while the resulting credential is committed
+  inside the protocol/admin transaction.
+- Added migration 018. Administration actions now persist request ID, hashed
+  session binding, scope, resulting version, operator reason, and assurance.
+- Changed the action principal's session binding from the raw cookie value to a
+  domain-separated HMAC digest. Raw admin session handles therefore enter
+  neither signed actions nor nonce/action records.
+- Extended executor results with:
+  - `committed: true`;
+  - `audit_status: "pending"`.
+
+  This is the explicit committed/outbox-pending semantic: the domain mutation
+  and durable audit evidence committed together, while Phase E owns delivery
+  to the external audit sink.
+- Added strict HTTP routes:
+  - `POST /api/widget/actions/prepare`;
+  - `POST /api/widget/actions/execute`;
+  - `GET /api/admin/pages/{page}`.
+- Both mutation routes require an authenticated current grant, exact Origin,
+  session-bound CSRF, bounded JSON with unknown-field rejection, and no-store
+  responses. Execution additionally requires an idempotency key.
+- Added `/admin/auth/reauth`, which starts a browser-bound OIDC request with
+  `prompt=login` and `max_age=0` and resumes only a validated `/admin` return
+  path.
+- Added React/RTK Query user flows:
+  - create;
+  - profile edit;
+  - enable/disable;
+  - unlock;
+  - password replacement;
+  - revoke access.
+
+  Password controls are cleared in `finally` paths after success or failure.
+  Fresh-auth errors redirect through the reauthentication route without
+  retaining password input.
+- Migrated CLI create, set-password, enable, and disable through the same
+  action and command services. Mutations now require the dedicated action-key
+  file; password replacement and state changes require operator reasons, and
+  disable requires `DISABLE`.
+- Closed the first-install dependency cycle by extending `console bootstrap`
+  with an optional owner-only password file. It can atomically create the first
+  owner account, credential, public PKCE client, owner grant, action record,
+  and audit-outbox entry.
+
+### Why
+
+- A capability named `users.write` cannot prove that a handle was authorized
+  specifically for password replacement or disabling. Command-level
+  capabilities make the audit and authorization statement exact.
+- Password hashing inside the one-connection SQLite transaction would hold the
+  complete control-plane lock during expensive Argon work. Preparing the
+  credential first and committing only its hash avoids that.
+- Disabling and password replacement must revoke provider grants, codes,
+  tokens, and browser sessions inside the same transaction as the user change,
+  nonce, version, action, outbox, and idempotency record.
+- A session cookie is bearer material. Even though the previous nonce binding
+  was not returned to the UI, persisting the raw value violated the design's
+  hashed-handle invariant.
+- User creation cannot require a pre-existing owner on an empty installation
+  without an atomic owner-provisioning path.
+
+### What worked
+
+- The lifecycle test performs all seven user operations and observes versions
+  1 through 7.
+- Two handles prepared at version 1 behave as two browser tabs: the first
+  update commits version 2; the stale update returns
+  `idpadminstore.ErrVersionConflict` and does not change data.
+- Concurrent requests using the same handle and idempotency key both receive a
+  successful result, while exactly one action and one version increment exist.
+- Reusing the idempotency key with different input returns
+  `ErrIdempotencyConflict`.
+- Missing reasons and wrong typed confirmations fail before nonce consumption.
+- A session older than five minutes cannot prepare a password action.
+- Tests prove disabling and password replacement revoke seeded provider
+  sessions; enabling does not reconstruct them.
+- HTTP tests prove exact-origin/CSRF/session enforcement, hashed session
+  binding, strict request decoding, and idempotency forwarding.
+- The CLI integration test bootstraps an empty database, then creates,
+  replaces the password for, disables, reads, and enables a user through the
+  shared command layer.
+- `pnpm --dir internal/adminweb/frontend run check` passed and rebuilt the
+  fixed embedded assets.
+- `go test ./... -count=1` and `make lint` passed.
+
+### What didn't work
+
+- The first action-service compile used an `err` variable scoped only to the
+  target branch:
+
+  ```text
+  pkg/idpadminapp/actions.go:105:13: undefined: err
+  pkg/idpadminapp/actions.go:106:6: undefined: err
+  pkg/idpadminapp/actions.go:107:29: undefined: err
+  ```
+
+  The shared error variable is now declared before target/create resolution.
+
+- Fetching a resulting version unconditionally broke an existing secret
+  executor test whose target intentionally had no aggregate version:
+
+  ```text
+  TestExecutorNeverReplaysOneTimeSecret: Received unexpected error:
+  administration record not found
+  ```
+
+  Missing versions remain valid for unversioned targets; create-user explicitly
+  initializes and then reports version 1.
+
+- The new test initially referenced the wrong existing sentinel:
+
+  ```text
+  undefined: idpadmin.ErrFreshAuthentication
+  ```
+
+  The package's established sentinel is `ErrFreshAuthRequired`.
+
+- The first HTTP preparation request returned 400 because
+  `PrepareActionRequest` had Go field names but strict decoding correctly
+  rejected JSON `target_id`. Explicit JSON tags now define the contract.
+
+- The CLI integration assertion expected lower-case JSON fields from a legacy
+  `idpstore.User`, but the existing read command emits the Go field names:
+
+  ```text
+  does not contain "\"disabled\": true"
+  ```
+
+  The test now checks the actual legacy read shape. Mutation responses
+  themselves use the typed lower-case administration contract.
+
+- The first Phase C commit attempt was rejected by the pre-commit lint hook:
+
+  ```text
+  pkg/idpadminapp/executor.go:116:5: ineffectual assignment to err (ineffassign)
+  internal/cmds/admin.go:347:6: func openAccountService is unused (unused)
+  ```
+
+  The result-version branch no longer assigns an error value that is never
+  read, and the legacy direct account-service opener was removed after all user
+  mutations moved to `adminUserRuntime`.
+
+- The focused command work reached two consecutive implementation fixes. Per
+  the repository debugging rule I stopped and emitted:
+
+  ```text
+  I think I'm stuck, let's TOUCH GRASS.
+  ```
+
+  After the required pause, the unchanged focused suite was rerun and passed
+  before further work continued.
+
+### What I learned
+
+- The original migration 016 action row was a useful atomic skeleton but not
+  sufficient audit evidence for real mutations. Append-only migration 018
+  corrects it without altering a checksummed migration.
+- The same concrete SQLite transaction can safely implement both protocol and
+  administration projection interfaces; querying the root store from inside
+  that callback would deadlock the single-connection topology.
+- Projection writes must be upserts. An insert-only targeted refresh succeeds
+  for create and fails every update on the user primary key.
+- Action preparation is itself state-changing because it allocates a durable
+  nonce, so it requires CSRF even though it does not change the target.
+- Idempotency lookup must occur before nonce consumption. That ordering lets a
+  completed same-key retry return its durable response while a different-key
+  replay still fails.
+
+### What was tricky to build
+
+- Create-user handles need a target ID for useful audit evidence, but the
+  browser must not choose it. The action service reserves a random target ID
+  before minting the handle and the command forces account creation to use it.
+- The executor increments existing versions before invoking the mutation,
+  whereas creation initializes its version inside the mutation. It therefore
+  reads the final version after either path before inserting action evidence.
+- The frontend must clear password DOM values even when preparation—not
+  execution—fails or triggers reauthentication.
+- Offline CLI execution has no browser session. It uses an ephemeral random
+  action binding, the active owner grant, a fresh local assurance, the same
+  signed handle service, and the same durable nonce/idempotency transaction.
+
+### What warrants a second pair of eyes
+
+- Review which destructive user commands beyond password replacement should
+  require fresh OIDC authentication. The implementation requires it for
+  password replacement and access revocation; disable uses reason plus typed
+  confirmation.
+- Review the first-owner password-file UX and whether deployments should
+  rotate that credential immediately after bootstrap.
+- Review whether profile editing should expose email verification in the first
+  frontend rather than only in the typed API contract.
+- Review error classification before the browser tests assert every status/code
+  pair.
+
+### What should be done in the future
+
+- Phase D should reuse `ActionService`, `Executor`, nonce/version/idempotency,
+  and one-time-secret policy for invitations and clients.
+- Phase E should deliver the audit outbox and change `audit_status` from
+  pending only when delivery evidence exists.
+- Phase F should exercise password clearing, reauthentication, stale tabs,
+  focus, keyboard, and responsive behavior in a real browser.
+
+### Code review instructions
+
+- Start with `pkg/idpadminapp/actions.go`, then follow
+  `UserCommandService.Execute` into `Executor.Execute`.
+- Review migration 018 beside `idpadminstore.Action` and
+  `sqlitestore.InsertAdminAction`.
+- Inspect both transaction-only assertions:
+  `RevokeUserSecurityArtifactsTx` and `RefreshAdminUserProjection`.
+- Follow HTTP execution from `internal/adminweb/handler.go` to the shared
+  service and compare it with `adminUserRuntime.execute` in
+  `internal/cmds/admin.go`.
+- Run:
+
+  ```text
+  go test ./pkg/idpadminapp ./internal/adminweb ./internal/cmds ./pkg/sqlitestore
+  pnpm --dir internal/adminweb/frontend run check
+  ```
+
+### Technical details
+
+```text
+prepare action
+  -> authenticate session and exact Origin/CSRF
+  -> resolve closed command definition
+  -> reload grant + check exact capability/freshness
+  -> load target version (or reserve create ID)
+  -> HMAC-sign immutable action claims
+  -> persist H(nonce) bound to H(session)
+
+execute action
+  -> authenticate session and exact Origin/CSRF
+  -> strict bounded input decode
+  -> verify handle + reload grant
+  -> validate reason and typed confirmation
+  -> prepare password hash outside transaction, if needed
+  -> BEGIN protocol/admin transaction
+     -> same-key idempotency replay check
+     -> consume nonce
+     -> compare/increment version
+     -> mutate user/credential/security artifacts
+     -> refresh projected row
+     -> insert complete action evidence
+     -> enqueue sanitized audit event
+     -> persist non-secret result
+  -> COMMIT
+  -> return {committed:true,audit_status:"pending",user:{...}}
+```

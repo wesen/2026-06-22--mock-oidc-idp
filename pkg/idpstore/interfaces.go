@@ -201,6 +201,12 @@ type TxStore interface {
 	StoreOperations
 }
 
+// UserSecurityTx is the security-artifact revocation operation available to a
+// caller that already owns the store transaction.
+type UserSecurityTx interface {
+	RevokeUserSecurityArtifactsTx(ctx context.Context, userID string, at time.Time) error
+}
+
 // LockoutPolicy controls the atomic failed-login window and lock duration.
 type LockoutPolicy struct {
 	Threshold int

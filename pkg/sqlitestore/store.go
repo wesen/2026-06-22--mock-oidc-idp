@@ -1498,6 +1498,13 @@ func (s *Store) RevokeUserSecurityArtifacts(ctx context.Context, userID string, 
 	})
 }
 
+func (s *Store) RevokeUserSecurityArtifactsTx(ctx context.Context, userID string, at time.Time) error {
+	if s.runner == nil {
+		return fmt.Errorf("user security artifact revocation requires a transaction")
+	}
+	return s.revokeUserSecurityArtifacts(ctx, userID, at)
+}
+
 // revokeUserSecurityArtifacts runs only on a transaction-scoped Store.
 //
 // tinyidp:transaction-scoped

@@ -240,7 +240,9 @@ type CreateBackupRequest struct {
 }
 
 type UserResult struct {
-	User UserDetail `json:"user"`
+	User        UserDetail `json:"user"`
+	Committed   bool       `json:"committed"`
+	AuditStatus string     `json:"audit_status"`
 }
 
 type InvitationResult struct {

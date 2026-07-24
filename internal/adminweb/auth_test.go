@@ -127,6 +127,21 @@ func TestOIDCPKCELoginCallbackSessionAndGrantInvalidation(t *testing.T) {
 	mutation.ServeHTTP(mutationResponse, mutationRequest)
 	require.Equal(t, http.StatusForbidden, mutationResponse.Code)
 
+	reauth := manager.Authenticate(http.HandlerFunc(manager.ReauthHandler))
+	reauthRequest := httptest.NewRequest(
+		http.MethodGet,
+		"https://issuer.example/admin/auth/reauth?return=/admin/users",
+		nil,
+	)
+	reauthRequest.AddCookie(sessionCookie)
+	reauthResponse := httptest.NewRecorder()
+	reauth.ServeHTTP(reauthResponse, reauthRequest)
+	require.Equal(t, http.StatusFound, reauthResponse.Code)
+	reauthLocation, err := url.Parse(reauthResponse.Header().Get("Location"))
+	require.NoError(t, err)
+	require.Equal(t, "login", reauthLocation.Query().Get("prompt"))
+	require.Equal(t, "0", reauthLocation.Query().Get("max_age"))
+
 	require.NoError(t, store.RevokeAdminGrant(ctx, grant.ID, grant.Version, now))
 	deniedResponse := httptest.NewRecorder()
 	protected.ServeHTTP(deniedResponse, protectedRequest)

@@ -17,13 +17,17 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/go-go-golems/tiny-idp/pkg/idp"
+	"github.com/go-go-golems/tiny-idp/pkg/idpaccounts"
 	"github.com/go-go-golems/tiny-idp/pkg/idpadminapp"
 	"github.com/go-go-golems/tiny-idp/pkg/sqlitestore"
 )
 
 type consoleBootstrapSettings struct {
-	OwnerLogin    string `glazed:"owner-login"`
-	PublicBaseURL string `glazed:"public-base-url"`
+	OwnerLogin        string `glazed:"owner-login"`
+	OwnerPasswordFile string `glazed:"owner-password-file"`
+	OwnerEmail        string `glazed:"owner-email"`
+	OwnerDisplayName  string `glazed:"owner-display-name"`
+	PublicBaseURL     string `glazed:"public-base-url"`
 }
 
 type consoleRevokeGrantSettings struct {
@@ -118,9 +122,13 @@ func newAdminConsoleBootstrapCommand(dbPath *string) (*AdminConsoleBootstrapComm
 
 Example:
   tinyidp admin --db /var/lib/tinyidp/idp.db console bootstrap \
-    --owner-login owner --public-base-url https://id.example`),
+    --owner-login owner --owner-password-file /run/secrets/tinyidp-owner-password \
+    --public-base-url https://id.example`),
 		cmds.WithFlags(
-			fields.New("owner-login", fields.TypeString, fields.WithRequired(true), fields.WithHelp("Existing TinyIDP login that will own the console")),
+			fields.New("owner-login", fields.TypeString, fields.WithRequired(true), fields.WithHelp("Existing or first-install TinyIDP login that will own the console")),
+			fields.New("owner-password-file", fields.TypeString, fields.WithHelp("Owner-only password file used only when atomically creating the first owner")),
+			fields.New("owner-email", fields.TypeString, fields.WithHelp("Email claim for a newly provisioned owner")),
+			fields.New("owner-display-name", fields.TypeString, fields.WithHelp("Display name for a newly provisioned owner")),
 			fields.New("public-base-url", fields.TypeString, fields.WithRequired(true), fields.WithHelp("Canonical HTTPS issuer origin")),
 		),
 		cmds.WithSections(output, command),
@@ -176,13 +184,44 @@ func (c *AdminConsoleBootstrapCommand) RunIntoGlazeProcessor(ctx context.Context
 	if err := vals.DecodeSectionInto(schema.DefaultSlug, &cfg); err != nil {
 		return err
 	}
-	service, closeFn, err := openOwnerService(valueOf(c.dbPath), c.now)
+	dbPath := valueOf(c.dbPath)
+	if dbPath == "" {
+		return fmt.Errorf("--db is required")
+	}
+	store, err := sqlitestore.Open(ctx, sqlitestore.DefaultConfig(dbPath))
 	if err != nil {
 		return err
 	}
-	defer closeFn()
+	defer store.Close()
+	service, err := idpadminapp.NewOwnerService(store, c.now)
+	if err != nil {
+		return err
+	}
+	var preparedOwner *idpaccounts.PreparedCreate
+	if cfg.OwnerPasswordFile != "" {
+		password, err := readOwnerOnlyFile(cfg.OwnerPasswordFile, "owner password", 1)
+		if err != nil {
+			return err
+		}
+		defer clearProductionSecret(password)
+		accounts, err := idpaccounts.NewService(store, idpaccounts.Options{
+			Clock: c.now, Audit: idp.NoopSink{},
+		})
+		if err != nil {
+			return err
+		}
+		prepared, err := accounts.PrepareCreate(ctx, idpaccounts.CreateRequest{
+			Login: cfg.OwnerLogin, Password: password, Email: cfg.OwnerEmail,
+			Name: cfg.OwnerDisplayName,
+		})
+		if err != nil {
+			return err
+		}
+		preparedOwner = &prepared
+	}
 	status, err := service.Bootstrap(ctx, idpadminapp.BootstrapOwnerRequest{
 		OwnerLogin: cfg.OwnerLogin, PublicBaseURL: cfg.PublicBaseURL,
+		PreparedOwner: preparedOwner,
 	})
 	if err != nil {
 		return err

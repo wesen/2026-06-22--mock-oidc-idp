@@ -58,29 +58,42 @@ type Capability string
 const (
 	CapabilityOverviewRead       Capability = "overview.read"
 	CapabilityUsersRead          Capability = "users.read"
-	CapabilityUsersWrite         Capability = "users.write"
-	CapabilityUsersRevokeAccess  Capability = "users.revoke_access"
+	CapabilityUsersCreate        Capability = "users.create"
+	CapabilityUsersUpdate        Capability = "users.update"
+	CapabilityUsersDisable       Capability = "users.disable"
+	CapabilityUsersPasswordSet   Capability = "users.password.set"
+	CapabilityUsersUnlock        Capability = "users.unlock"
+	CapabilityUsersAccessRevoke  Capability = "users.access.revoke"
 	CapabilityInvitationsRead    Capability = "invitations.read"
-	CapabilityInvitationsWrite   Capability = "invitations.write"
+	CapabilityInvitationsCreate  Capability = "invitations.create"
+	CapabilityInvitationsRevoke  Capability = "invitations.revoke"
 	CapabilityClientsRead        Capability = "clients.read"
-	CapabilityClientsWrite       Capability = "clients.write"
+	CapabilityClientsCreate      Capability = "clients.create"
+	CapabilityClientsUpdate      Capability = "clients.update"
+	CapabilityClientsDisable     Capability = "clients.disable"
 	CapabilityClientSecretRotate Capability = "clients.secret.rotate"
 	CapabilityKeysRead           Capability = "keys.read"
+	CapabilityKeysGenerate       Capability = "keys.generate"
 	CapabilityKeysRotate         Capability = "keys.rotate"
 	CapabilityKeysRetire         Capability = "keys.retire"
 	CapabilityActivityRead       Capability = "activity.read"
 	CapabilityOperationsRead     Capability = "operations.read"
-	CapabilityBackupCreate       Capability = "backup.create"
-	CapabilityDiagnosticsRead    Capability = "diagnostics.read"
+	CapabilityOperationsDoctor   Capability = "operations.doctor"
+	CapabilityBackupCreate       Capability = "operations.backup.create"
+	CapabilityBackupVerify       Capability = "operations.backup.verify"
+	CapabilityDiagnosticsRead    Capability = "operations.diagnostics"
 )
 
 var capabilities = []Capability{
-	CapabilityOverviewRead, CapabilityUsersRead, CapabilityUsersWrite,
-	CapabilityUsersRevokeAccess, CapabilityInvitationsRead,
-	CapabilityInvitationsWrite, CapabilityClientsRead, CapabilityClientsWrite,
-	CapabilityClientSecretRotate, CapabilityKeysRead, CapabilityKeysRotate,
-	CapabilityKeysRetire, CapabilityActivityRead, CapabilityOperationsRead,
-	CapabilityBackupCreate, CapabilityDiagnosticsRead,
+	CapabilityOverviewRead, CapabilityUsersRead, CapabilityUsersCreate,
+	CapabilityUsersUpdate, CapabilityUsersDisable, CapabilityUsersPasswordSet,
+	CapabilityUsersUnlock, CapabilityUsersAccessRevoke, CapabilityInvitationsRead,
+	CapabilityInvitationsCreate, CapabilityInvitationsRevoke, CapabilityClientsRead,
+	CapabilityClientsCreate, CapabilityClientsUpdate, CapabilityClientsDisable,
+	CapabilityClientSecretRotate, CapabilityKeysRead, CapabilityKeysGenerate,
+	CapabilityKeysRotate, CapabilityKeysRetire, CapabilityActivityRead,
+	CapabilityOperationsRead, CapabilityOperationsDoctor, CapabilityBackupCreate,
+	CapabilityBackupVerify, CapabilityDiagnosticsRead,
 }
 
 func AllCapabilities() []Capability { return slices.Clone(capabilities) }

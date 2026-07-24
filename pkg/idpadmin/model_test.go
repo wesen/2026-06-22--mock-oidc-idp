@@ -26,7 +26,7 @@ func TestAuthorizerRevalidatesGrantVersionAndFreshness(t *testing.T) {
 	now := time.Date(2026, 7, 23, 20, 0, 0, 0, time.UTC)
 	grant := Grant{
 		ID: "grant-1", ActorSubject: "subject-1", Scope: SystemScope(), Role: "owner",
-		Capabilities: []Capability{CapabilityUsersWrite}, Version: 2, IssuedAt: now.Add(-time.Hour),
+		Capabilities: []Capability{CapabilityUsersUpdate}, Version: 2, IssuedAt: now.Add(-time.Hour),
 	}
 	authorizer, err := NewAuthorizer(grantReaderFunc(func(context.Context, string) (Grant, error) {
 		return grant, nil
@@ -37,19 +37,19 @@ func TestAuthorizerRevalidatesGrantVersionAndFreshness(t *testing.T) {
 		Authenticated: now.Add(-time.Minute), Assurance: AssuranceFresh,
 	}
 
-	got, err := authorizer.Authorize(context.Background(), principal, "grant-1", 2, SystemScope(), CapabilityUsersWrite, true)
+	got, err := authorizer.Authorize(context.Background(), principal, "grant-1", 2, SystemScope(), CapabilityUsersUpdate, true)
 	require.NoError(t, err)
 	require.Equal(t, grant, got)
 
-	_, err = authorizer.Authorize(context.Background(), principal, "grant-1", 1, SystemScope(), CapabilityUsersWrite, false)
+	_, err = authorizer.Authorize(context.Background(), principal, "grant-1", 1, SystemScope(), CapabilityUsersUpdate, false)
 	require.ErrorIs(t, err, ErrGrantChanged)
 
 	principal.Authenticated = now.Add(-6 * time.Minute)
-	_, err = authorizer.Authorize(context.Background(), principal, "grant-1", 2, SystemScope(), CapabilityUsersWrite, true)
+	_, err = authorizer.Authorize(context.Background(), principal, "grant-1", 2, SystemScope(), CapabilityUsersUpdate, true)
 	require.ErrorIs(t, err, ErrFreshAuthRequired)
 
 	grant.RevokedAt = &now
-	_, err = authorizer.Authorize(context.Background(), principal, "grant-1", 2, SystemScope(), CapabilityUsersWrite, false)
+	_, err = authorizer.Authorize(context.Background(), principal, "grant-1", 2, SystemScope(), CapabilityUsersUpdate, false)
 	require.ErrorIs(t, err, ErrGrantInactive)
 }
 
@@ -62,7 +62,7 @@ func TestActionHandleTamperExpiryAndBinding(t *testing.T) {
 	}
 	raw, err := service.Mint(ActionClaims{
 		SessionID: principal.SessionID, Subject: principal.Subject, GrantID: "grant-1",
-		GrantVersion: 3, Scope: SystemScope(), Capability: CapabilityUsersWrite,
+		GrantVersion: 3, Scope: SystemScope(), Capability: CapabilityUsersUpdate,
 		Command: "users.disable", TargetType: "user", TargetID: "user-1", ExpectedVersion: 7,
 	})
 	require.NoError(t, err)

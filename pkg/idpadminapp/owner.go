@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-go-golems/tiny-idp/pkg/idpaccounts"
 	"github.com/go-go-golems/tiny-idp/pkg/idpadmin"
 	"github.com/go-go-golems/tiny-idp/pkg/idpadminstore"
 	"github.com/go-go-golems/tiny-idp/pkg/idpstore"
@@ -35,6 +36,7 @@ type OwnerService struct {
 type BootstrapOwnerRequest struct {
 	OwnerLogin    string
 	PublicBaseURL string
+	PreparedOwner *idpaccounts.PreparedCreate
 }
 
 type OwnerStatus struct {
@@ -82,8 +84,22 @@ func (s *OwnerService) Bootstrap(ctx context.Context, request BootstrapOwnerRequ
 	var result OwnerStatus
 	err = s.store.AdminUpdate(ctx, func(protocol idpstore.TxStore, admin idpadminstore.TxStore) error {
 		user, err := protocol.GetUserByLogin(ctx, login)
-		if err != nil {
+		if errors.Is(err, idpstore.ErrNotFound) && request.PreparedOwner != nil {
+			prepared := *request.PreparedOwner
+			if prepared.Login != login {
+				return errors.New("prepared owner login does not match owner login")
+			}
+			if err := protocol.PutUser(ctx, prepared.Login, prepared.User); err != nil {
+				return pkgerrors.Wrap(err, "create installation owner")
+			}
+			if err := protocol.PutPasswordCredential(ctx, prepared.Credential); err != nil {
+				return pkgerrors.Wrap(err, "create installation owner credential")
+			}
+			user = prepared.User
+		} else if err != nil {
 			return pkgerrors.Wrap(err, "resolve owner login")
+		} else if request.PreparedOwner != nil {
+			return errors.New("installation owner already exists; omit owner password provisioning")
 		}
 		client := adminConsoleClient(redirectURI, now)
 		existing, err := protocol.GetClient(ctx, AdminConsoleClientID)
@@ -105,9 +121,12 @@ func (s *OwnerService) Bootstrap(ctx context.Context, request BootstrapOwnerRequ
 			return pkgerrors.Wrap(err, "create owner grant")
 		}
 		if err := admin.InsertAdminAction(ctx, idpadminstore.Action{
-			ID: actionID, Nonce: nonce, Subject: user.Sub, GrantID: grant.ID, GrantVersion: grant.Version,
+			ID: actionID, RequestID: actionID, SessionBinding: "local-bootstrap",
+			Nonce: nonce, Subject: user.Sub, GrantID: grant.ID, GrantVersion: grant.Version,
+			Scope:      grant.Scope,
 			Capability: idpadmin.CapabilityOperationsRead, Command: "console.owner.bootstrap",
 			TargetType: "admin_grant", TargetID: grant.ID, ExpectedVersion: 0,
+			ResultingVersion: grant.Version, Assurance: idpadmin.AssuranceFresh,
 			Status: "succeeded", CreatedAt: now, CompletedAt: &now,
 		}); err != nil {
 			return pkgerrors.Wrap(err, "record bootstrap action")

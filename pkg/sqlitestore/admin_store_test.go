@@ -23,7 +23,7 @@ func TestAdminGrantLifecycleAndSingleOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ActorSubject != grant.ActorSubject || !got.Has(idpadmin.CapabilityUsersWrite) {
+	if got.ActorSubject != grant.ActorSubject || !got.Has(idpadmin.CapabilityUsersUpdate) {
 		t.Fatalf("grant = %#v", got)
 	}
 	second := grant

@@ -80,6 +80,22 @@ func (s *Store) CheckAdminUserProjection(ctx context.Context, now time.Time) (id
 	return report, nil
 }
 
+func (s *Store) RefreshAdminUserProjection(ctx context.Context, userID string, now time.Time) error {
+	if s.runner == nil {
+		return fmt.Errorf("admin user projection refresh requires a transaction")
+	}
+	expected, err := s.expectedAdminUserProjection(ctx, now, false)
+	if err != nil {
+		return err
+	}
+	for _, row := range expected {
+		if row.UserID == userID {
+			return s.putAdminUserProjection(ctx, row)
+		}
+	}
+	return idpstore.ErrNotFound
+}
+
 func (s *Store) expectedAdminUserProjection(ctx context.Context, now time.Time, initializeVersions bool) ([]adminUserProjection, error) {
 	users, err := s.readProjectionUsers(ctx)
 	if err != nil {
@@ -213,7 +229,20 @@ func (s *Store) putAdminUserProjection(ctx context.Context, row adminUserProject
 			(user_id, subject, login, email, display_name, disabled, locked_until_ns,
 			 last_successful_login_at_ns, active_session_count, active_grant_count,
 			 created_at_ns, updated_at_ns, version)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(user_id) DO UPDATE SET
+			subject=excluded.subject,
+			login=excluded.login,
+			email=excluded.email,
+			display_name=excluded.display_name,
+			disabled=excluded.disabled,
+			locked_until_ns=excluded.locked_until_ns,
+			last_successful_login_at_ns=excluded.last_successful_login_at_ns,
+			active_session_count=excluded.active_session_count,
+			active_grant_count=excluded.active_grant_count,
+			created_at_ns=excluded.created_at_ns,
+			updated_at_ns=excluded.updated_at_ns,
+			version=excluded.version`,
 		row.UserID, row.Subject, row.Login, row.Email, row.DisplayName, row.Disabled,
 		nullableTime(row.LockedUntil), nullableTime(row.LastSuccessfulLoginAt),
 		row.ActiveSessionCount, row.ActiveGrantCount, row.CreatedAt.UnixNano(),

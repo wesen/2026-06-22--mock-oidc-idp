@@ -2,16 +2,22 @@ package cmds
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/go-go-golems/tiny-idp/internal/admin"
 	"github.com/go-go-golems/tiny-idp/pkg/idp"
 	"github.com/go-go-golems/tiny-idp/pkg/idpaccounts"
+	"github.com/go-go-golems/tiny-idp/pkg/idpadmin"
+	"github.com/go-go-golems/tiny-idp/pkg/idpadminapp"
 	"github.com/go-go-golems/tiny-idp/pkg/sqlitestore"
 )
 
@@ -51,16 +57,18 @@ throwaway databases only.`,
 
 func newAdminUserCommand(dbPath *string) *cobra.Command {
 	cmd := &cobra.Command{Use: "user", Short: "Manage users and password credentials"}
-	cmd.AddCommand(newAdminUserCreateCommand(dbPath))
-	cmd.AddCommand(newAdminUserSetPasswordCommand(dbPath))
+	var actionKeyFile string
+	cmd.PersistentFlags().StringVar(&actionKeyFile, "admin-action-key-file", "", "Owner-only action-handle key file")
+	cmd.AddCommand(newAdminUserCreateCommand(dbPath, &actionKeyFile))
+	cmd.AddCommand(newAdminUserSetPasswordCommand(dbPath, &actionKeyFile))
 	cmd.AddCommand(newAdminUserGetCommand(dbPath))
-	cmd.AddCommand(newAdminUserDisableCommand(dbPath, true))
-	cmd.AddCommand(newAdminUserDisableCommand(dbPath, false))
+	cmd.AddCommand(newAdminUserDisableCommand(dbPath, &actionKeyFile, true))
+	cmd.AddCommand(newAdminUserDisableCommand(dbPath, &actionKeyFile, false))
 	return cmd
 }
 
-func newAdminUserCreateCommand(dbPath *string) *cobra.Command {
-	var login, password, email, name, sub, id string
+func newAdminUserCreateCommand(dbPath, actionKeyFile *string) *cobra.Command {
+	var login, password, email, name string
 	var emailVerified, passwordFromStdin bool
 	cmd := &cobra.Command{
 		Use:   "create",
@@ -70,23 +78,25 @@ func newAdminUserCreateCommand(dbPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			svc, closeFn, err := openAccountService(*dbPath)
+			defer clearProductionSecret(pw)
+			runtime, err := openAdminUserRuntime(cmd.Context(), *dbPath, *actionKeyFile)
 			if err != nil {
 				return err
 			}
-			defer closeFn()
-			u, err := svc.Create(cmd.Context(), idpaccounts.CreateRequest{Login: login, Password: pw, ID: id, Subject: sub, Email: email, EmailVerified: emailVerified, Name: name})
+			defer runtime.close()
+			result, err := runtime.execute(cmd.Context(), idpadminapp.CommandUsersCreate, "", map[string]any{
+				"login": login, "password": string(pw), "email": email,
+				"email_verified": emailVerified, "display_name": name,
+			})
 			if err != nil {
 				return err
 			}
-			return writeJSONLine(cmd.OutOrStdout(), map[string]any{"status": "created", "user": u})
+			return writeJSONLine(cmd.OutOrStdout(), map[string]any{"status": "created", "user": result.User})
 		},
 	}
 	cmd.Flags().StringVar(&login, "login", "", "Login name")
 	cmd.Flags().StringVar(&password, "password", "", "Password value (prefer --password-from-stdin outside tests)")
 	cmd.Flags().BoolVar(&passwordFromStdin, "password-from-stdin", false, "Read password from stdin")
-	cmd.Flags().StringVar(&id, "id", "", "Optional user ID")
-	cmd.Flags().StringVar(&sub, "sub", "", "Optional OIDC subject; defaults to user ID")
 	cmd.Flags().StringVar(&email, "email", "", "Email claim")
 	cmd.Flags().BoolVar(&emailVerified, "email-verified", false, "Set email_verified claim")
 	cmd.Flags().StringVar(&name, "name", "", "Display name")
@@ -94,8 +104,8 @@ func newAdminUserCreateCommand(dbPath *string) *cobra.Command {
 	return cmd
 }
 
-func newAdminUserSetPasswordCommand(dbPath *string) *cobra.Command {
-	var login, password string
+func newAdminUserSetPasswordCommand(dbPath, actionKeyFile *string) *cobra.Command {
+	var login, password, reason string
 	var passwordFromStdin bool
 	cmd := &cobra.Command{
 		Use:   "set-password",
@@ -105,12 +115,19 @@ func newAdminUserSetPasswordCommand(dbPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			svc, closeFn, err := openAccountService(*dbPath)
+			defer clearProductionSecret(pw)
+			runtime, err := openAdminUserRuntime(cmd.Context(), *dbPath, *actionKeyFile)
 			if err != nil {
 				return err
 			}
-			defer closeFn()
-			if err := svc.SetPassword(cmd.Context(), idpaccounts.SetPasswordRequest{Login: login, Password: pw}); err != nil {
+			defer runtime.close()
+			user, err := runtime.store.GetUserByLogin(cmd.Context(), login)
+			if err != nil {
+				return err
+			}
+			if _, err := runtime.execute(cmd.Context(), idpadminapp.CommandUsersSetPassword, user.ID, map[string]any{
+				"password": string(pw), "reason": reason,
+			}); err != nil {
 				return err
 			}
 			return writeJSONLine(cmd.OutOrStdout(), map[string]any{"status": "password-updated", "login": login})
@@ -119,7 +136,9 @@ func newAdminUserSetPasswordCommand(dbPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&login, "login", "", "Login name")
 	cmd.Flags().StringVar(&password, "password", "", "Password value (prefer --password-from-stdin outside tests)")
 	cmd.Flags().BoolVar(&passwordFromStdin, "password-from-stdin", false, "Read password from stdin")
+	cmd.Flags().StringVar(&reason, "reason", "", "Required operator reason")
 	_ = cmd.MarkFlagRequired("login")
+	_ = cmd.MarkFlagRequired("reason")
 	return cmd
 }
 
@@ -146,7 +165,7 @@ func newAdminUserGetCommand(dbPath *string) *cobra.Command {
 	return cmd
 }
 
-func newAdminUserDisableCommand(dbPath *string, disabled bool) *cobra.Command {
+func newAdminUserDisableCommand(dbPath, actionKeyFile *string, disabled bool) *cobra.Command {
 	name := "enable"
 	status := "enabled"
 	shortVerb := "Enable"
@@ -155,26 +174,152 @@ func newAdminUserDisableCommand(dbPath *string, disabled bool) *cobra.Command {
 		status = "disabled"
 		shortVerb = "Disable"
 	}
-	var login string
+	var login, reason, confirmation string
 	cmd := &cobra.Command{
 		Use:   name,
 		Short: fmt.Sprintf("%s a user", shortVerb),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			svc, closeFn, err := openAdminService(*dbPath)
+			runtime, err := openAdminUserRuntime(cmd.Context(), *dbPath, *actionKeyFile)
 			if err != nil {
 				return err
 			}
-			defer closeFn()
-			u, err := svc.SetUserDisabled(cmd.Context(), login, disabled)
+			defer runtime.close()
+			user, err := runtime.store.GetUserByLogin(cmd.Context(), login)
 			if err != nil {
 				return err
 			}
-			return writeJSONLine(cmd.OutOrStdout(), map[string]any{"status": status, "user": u})
+			command := idpadminapp.CommandUsersEnable
+			if disabled {
+				command = idpadminapp.CommandUsersDisable
+			}
+			result, err := runtime.execute(cmd.Context(), command, user.ID, map[string]any{
+				"reason": reason, "confirmation": confirmation,
+			})
+			if err != nil {
+				return err
+			}
+			return writeJSONLine(cmd.OutOrStdout(), map[string]any{"status": status, "user": result.User})
 		},
 	}
 	cmd.Flags().StringVar(&login, "login", "", "Login name")
+	cmd.Flags().StringVar(&reason, "reason", "", "Required operator reason")
+	cmd.Flags().StringVar(&confirmation, "confirm", "", "Typed confirmation (DISABLE when disabling)")
 	_ = cmd.MarkFlagRequired("login")
+	_ = cmd.MarkFlagRequired("reason")
 	return cmd
+}
+
+type adminUserRuntime struct {
+	store     *sqlitestore.Store
+	actions   *idpadminapp.ActionService
+	users     *idpadminapp.UserCommandService
+	principal idpadmin.AdminPrincipal
+}
+
+func openAdminUserRuntime(ctx context.Context, dbPath, actionKeyFile string) (*adminUserRuntime, error) {
+	if strings.TrimSpace(dbPath) == "" {
+		return nil, fmt.Errorf("--db is required")
+	}
+	key, err := readOwnerOnlyFile(actionKeyFile, "admin action key", 32)
+	if err != nil {
+		return nil, err
+	}
+	defer clearProductionSecret(key)
+	store, err := sqlitestore.Open(ctx, sqlitestore.DefaultConfig(dbPath))
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	if _, err := store.RebuildAdminUserProjection(ctx, now); err != nil {
+		_ = store.Close()
+		return nil, err
+	}
+	grant, err := store.GetActiveSystemOwner(ctx, now)
+	if err != nil {
+		_ = store.Close()
+		return nil, fmt.Errorf("load active console owner: %w", err)
+	}
+	sessionBinding, err := adminCLIRandomID()
+	if err != nil {
+		_ = store.Close()
+		return nil, err
+	}
+	clock := time.Now
+	handles, err := idpadmin.NewHandleService(key, 5*time.Minute, clock)
+	if err != nil {
+		_ = store.Close()
+		return nil, err
+	}
+	authorizer, err := idpadmin.NewAuthorizer(store, 5*time.Minute, clock)
+	if err != nil {
+		_ = store.Close()
+		return nil, err
+	}
+	executor, err := idpadminapp.NewExecutor(store, handles, authorizer, clock)
+	if err != nil {
+		_ = store.Close()
+		return nil, err
+	}
+	actions, err := idpadminapp.NewActionService(store, handles, authorizer, clock)
+	if err != nil {
+		_ = store.Close()
+		return nil, err
+	}
+	users, err := idpadminapp.NewUserCommandService(store, executor, idpaccounts.Options{}, clock)
+	if err != nil {
+		_ = store.Close()
+		return nil, err
+	}
+	return &adminUserRuntime{
+		store: store, actions: actions, users: users,
+		principal: idpadmin.AdminPrincipal{
+			Subject: grant.ActorSubject, SessionID: sessionBinding,
+			Authenticated: now, Assurance: idpadmin.AssuranceFresh,
+			GrantID: grant.ID, GrantVersion: grant.Version,
+		},
+	}, nil
+}
+
+func (r *adminUserRuntime) close() { _ = r.store.Close() }
+
+func (r *adminUserRuntime) execute(
+	ctx context.Context,
+	command, targetID string,
+	input map[string]any,
+) (idpadmin.UserResult, error) {
+	prepared, err := r.actions.Prepare(ctx, r.principal, idpadminapp.PrepareActionRequest{
+		Command: command, TargetID: targetID,
+	})
+	if err != nil {
+		return idpadmin.UserResult{}, err
+	}
+	raw, err := json.Marshal(input)
+	if err != nil {
+		return idpadmin.UserResult{}, err
+	}
+	hash := sha256.Sum256(raw)
+	requestID, err := adminCLIRandomID()
+	if err != nil {
+		return idpadmin.UserResult{}, err
+	}
+	response, err := r.users.Execute(ctx, idpadminapp.ExecutionRequest{
+		Handle: prepared.Handle, Principal: r.principal, RequestID: requestID,
+		IdempotencyKey: requestID, RequestHash: hash[:],
+	}, raw)
+	if err != nil {
+		return idpadmin.UserResult{}, err
+	}
+	var result idpadmin.UserResult
+	err = json.Unmarshal(response, &result)
+	return result, err
+}
+
+func adminCLIRandomID() (string, error) {
+	value := make([]byte, 18)
+	if _, err := rand.Read(value); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(value), nil
 }
 
 func openAdminService(dbPath string) (*admin.Service, func(), error) {
@@ -197,28 +342,6 @@ func openAdminService(dbPath string) (*admin.Service, func(), error) {
 		return nil, nil, err
 	}
 	return svc, func() { _ = audit.Close(); _ = st.Close() }, nil
-}
-
-func openAccountService(dbPath string) (*idpaccounts.Service, func(), error) {
-	if strings.TrimSpace(dbPath) == "" {
-		return nil, nil, fmt.Errorf("--db is required")
-	}
-	store, err := sqlitestore.Open(context.Background(), sqlitestore.DefaultConfig(dbPath))
-	if err != nil {
-		return nil, nil, err
-	}
-	audit, err := idp.NewFileAuditSink(dbPath + ".audit.jsonl")
-	if err != nil {
-		_ = store.Close()
-		return nil, nil, err
-	}
-	service, err := idpaccounts.NewService(store, idpaccounts.Options{Audit: audit})
-	if err != nil {
-		_ = audit.Close()
-		_ = store.Close()
-		return nil, nil, err
-	}
-	return service, func() { _ = audit.Close(); _ = store.Close() }, nil
 }
 
 func emitAdminAudit(ctx context.Context, dbPath string, event idp.Event) error {

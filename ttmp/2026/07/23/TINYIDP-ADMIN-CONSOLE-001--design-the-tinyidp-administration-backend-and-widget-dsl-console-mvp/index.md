@@ -20,6 +20,8 @@ RelatedFiles:
       Note: OIDC PKCE, admin-session, grant revalidation, and CSRF boundary
     - Path: repo://internal/adminweb/frontend/src/App.tsx
       Note: React administration shell and read-only navigation
+    - Path: repo://internal/adminweb/frontend/src/UserManagement.tsx
+      Note: Accessible React user operation forms and password clearing
     - Path: repo://internal/adminweb/frontend/src/api.ts
       Note: RTK Query session and Widget page API contracts
     - Path: repo://internal/adminweb/handler.go
@@ -28,14 +30,26 @@ RelatedFiles:
       Note: Server-owned Widget DSL page definitions
     - Path: repo://internal/adminweb/widget_runtime.go
       Note: Constrained widget.dsl and tinyidp.admin Goja runtime
+    - Path: repo://internal/cmds/admin_console.go
+      Note: Atomic first-install owner account and console bootstrap
+    - Path: repo://internal/cmds/admin_user_test.go
+      Note: CLI lifecycle through shared guarded commands
     - Path: repo://internal/cmds/serve_production.go
       Note: Production console construction and public listener integration
     - Path: repo://internal/sections/production/section.go
       Note: Owner-only admin authentication key configuration
+    - Path: repo://pkg/idpadminapp/actions.go
+      Note: Closed user command registry and signed action preparation
     - Path: repo://pkg/idpadminapp/page_data.go
       Note: Capability-authorized read-only page orchestration
+    - Path: repo://pkg/idpadminapp/user_commands.go
+      Note: Transaction-safe guarded user lifecycle command service
+    - Path: repo://pkg/idpadminapp/user_commands_test.go
+      Note: Lifecycle, stale-tab, replay, concurrency, freshness, and revocation evidence
     - Path: repo://pkg/sqlitestore/admin_queries.go
       Note: Bounded parameterized administration read models
+    - Path: repo://pkg/sqlitestore/migrations/018_admin_action_evidence.sql
+      Note: Expanded durable action audit evidence
 ExternalSources:
     - local:tiny-idp-ux.md
 Summary: Design a production system-scoped administration control plane and widget.dsl v3 console for TinyIDP.
@@ -43,6 +57,7 @@ LastUpdated: 2026-07-23T20:15:16.705417445-04:00
 WhatFor: Coordinate implementation of TinyIDP's first production administration control plane and Widget DSL console.
 WhenToUse: Use as the landing page for architecture review, implementation planning, and phased delivery.
 ---
+
 
 
 

@@ -303,6 +303,19 @@ func (s *Store) GetResourceVersion(ctx context.Context, resourceType, resourceID
 	return version, err
 }
 
+func (s *Store) CreateResourceVersion(ctx context.Context, resourceType, resourceID string, version int64, now time.Time) error {
+	if version < 1 {
+		return fmt.Errorf("resource version must be positive")
+	}
+	_, err := s.conn().ExecContext(ctx, `
+		INSERT INTO admin_resource_versions(resource_type, resource_id, version, updated_at_ns)
+		VALUES (?, ?, ?, ?)`, resourceType, resourceID, version, now.UTC().UnixNano())
+	if isConstraint(err) {
+		return idpadminstore.ErrDuplicate
+	}
+	return err
+}
+
 func (s *Store) CompareAndIncrementResourceVersion(ctx context.Context, resourceType, resourceID string, expected int64, now time.Time) (int64, error) {
 	result, err := s.conn().ExecContext(ctx, `
 		UPDATE admin_resource_versions SET version=version+1, updated_at_ns=?
@@ -356,11 +369,15 @@ func (s *Store) InsertAdminAction(ctx context.Context, action idpadminstore.Acti
 	_, err := s.conn().ExecContext(ctx, `
 		INSERT INTO admin_actions
 			(id, nonce, actor_subject, grant_id, grant_version, capability, command, target_type,
-			 target_id, expected_version, status, error_code, created_at_ns, completed_at_ns)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 target_id, expected_version, status, error_code, created_at_ns, completed_at_ns,
+			 request_id, session_binding, scope_kind, scope_id, resulting_version,
+			 operator_reason, assurance)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		action.ID, actionNonceKey(action.Nonce), action.Subject, action.GrantID, action.GrantVersion, action.Capability,
 		action.Command, action.TargetType, action.TargetID, action.ExpectedVersion, action.Status,
-		action.ErrorCode, action.CreatedAt.UnixNano(), nullableTime(action.CompletedAt))
+		action.ErrorCode, action.CreatedAt.UnixNano(), nullableTime(action.CompletedAt),
+		action.RequestID, action.SessionBinding, action.Scope.Kind, action.Scope.ID,
+		action.ResultingVersion, action.Reason, action.Assurance)
 	if isConstraint(err) {
 		return idpadminstore.ErrDuplicate
 	}
