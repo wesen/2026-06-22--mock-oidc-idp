@@ -2819,3 +2819,188 @@ created_at
 ```
 
 `archive_b64` is the only secret-bearing field and is never logged.
+
+## Step 18 — initialize application secrets, add the admin stack, and author the local-app playbook
+
+### Prompt context
+
+The implementation session continued under the request to implement the ticket,
+keep a frequent detailed diary, check tasks as they become true, and commit at
+appropriate intervals. The owner also asked that the reusable devctl skill be
+updated after implementation.
+
+### What I did
+
+- Added the `secrets-init` dynamic devctl command. It groups a manifest's fields
+  into runtime, bootstrap, and integration records; generates cryptographically
+  random values; creates only missing Vault KV v2 records with CAS zero; and
+  validates existing records without replacing them.
+- Corrected repeat secret materialization. The managed target is now kept as a
+  lexical repository-relative path while its destination is resolved. This
+  preserves the ability to recognize and replace the plugin-owned symlink.
+- Added `examples/tinyidp-admin-console` with:
+  - a Caddy HTTPS proxy and the external `tinyidp-local-caddy-pki` volume;
+  - Mailpit for private local email delivery;
+  - persistent SQLite and admin-artifact storage;
+  - first-run database/key initialization and owner-grant bootstrap;
+  - file-mounted token, admin, invitation, email, and owner credentials;
+  - CA export and certificate-verifying smoke commands;
+  - a technical operations README.
+- Initialized the live `dev` Vault records for the admin console and
+  materialized six files through the managed generation symlink. The owner
+  password was written only to the ignored `owner-password.txt` file and was
+  never printed.
+- Added the embedded Glazed tutorial
+  `tutorial-local-development-apps`. It explains integration modes, issuer
+  identity, public/confidential clients, PKCE, proxy listeners, browser versus
+  backchannel addressing, the Vault hierarchy, atomic secret materialization,
+  the persistent Caddy authority, recovery, relying-party pseudocode, a test
+  matrix, and the PULP OS device-authorization extension.
+- Added a Go test that loads the embedded help filesystem and verifies the
+  tutorial's slug, type, top-level discoverability, command/flag references,
+  and critical content.
+- Updated the shared `devctl-plugin-authoring` skill with manifest-driven
+  profiles, deterministic dynamic commands, foreground Compose supervision,
+  secret-set atomicity, the managed-symlink path rule, KV v2 CAS initialization,
+  network-pool guidance, and the installed `logs --tail` syntax.
+
+### Commands and evidence
+
+The Python operation suite passed after adding initialization and the repeat
+materialization regression:
+
+```text
+python3 -m unittest discover -s devctl/tests -v
+Ran 15 tests
+OK
+```
+
+The live Vault records were created without emitting their values:
+
+```text
+kv/tiny-idp/dev/admin-console/bootstrap  version 1
+kv/tiny-idp/dev/admin-console/runtime    version 1
+```
+
+The focused embedded-help test passed:
+
+```text
+go test ./cmd/tinyidp/doc
+ok github.com/go-go-golems/tiny-idp/cmd/tinyidp/doc
+```
+
+The actual CLI rendered the page:
+
+```text
+go run ./cmd/tinyidp help tutorial-local-development-apps
+# Tutorial: build local development applications with tinyidp
+```
+
+### What worked
+
+- Secret initialization is idempotent: complete existing records are validated
+  and skipped rather than rotated implicitly.
+- Secret materialization succeeds on consecutive runs, which exercises the
+  managed-symlink promotion path.
+- The admin image built successfully from the shared production Dockerfile.
+- The Glazed help loader discovered and rendered the new tutorial without
+  additional command wiring.
+
+### What didn't work
+
+The first retained admin launch failed after the image build because the new
+Compose network requested a subnet already used by another environment:
+
+```text
+failed to create network tinyidp-admin-console_idp-backend:
+Pool overlaps with other one on this address space
+```
+
+The fixed subnet and container address were unnecessary, so they were removed.
+The trusted-proxy development boundary was changed to Docker's private
+`172.16.0.0/12` range and the container health check was changed to loopback.
+
+The second launch exited during the cached Go build. `devctl status` reported
+the service dead but had no exit code, stdout ended at:
+
+```text
+#12 [idp build 6/6] RUN CGO_ENABLED=1 go build ...
+```
+
+and `devctl logs --service admin-console-compose --stderr` was empty. Following
+the repository rule limiting legitimate server-fix attempts to two, I stopped
+runtime debugging and explicitly marked the smoke acceptance as blocked.
+
+Two command-level details were also discovered:
+
+- `devctl logs` uses `--tail`, not `--tail-lines`;
+- `--tail-lines` belongs to `devctl status` and controls dead-service stderr
+  context.
+
+The first focused Go test attempt failed in the restricted sandbox because the
+host Go build cache was read-only:
+
+```text
+open /home/manuel/.cache/go-build/...: read-only file system
+```
+
+It passed unchanged when run with approved host-cache access.
+
+### What I learned
+
+- Fixed Compose address pools make independently useful demos contend for
+  machine-global Docker address space. Service DNS and loopback health probes
+  are safer defaults.
+- A symlink's lexical identity is security-relevant. Resolving the path before
+  checking it transforms a managed symlink into the generation directory it
+  names and makes an idempotent prepare look like an unsafe overwrite.
+- The Glazed embedded help directory is sufficient for registration; a focused
+  store lookup tests discoverability without coupling the test to terminal
+  rendering.
+- A supervised foreground Compose process can disappear while BuildKit output
+  ends without a useful exit record. Acceptance must be based on live endpoints
+  and smoke results, not on a successful image build.
+
+### What was tricky to build
+
+- Initialization must distinguish absent records from incomplete existing
+  records. Missing records are generated with CAS zero; incomplete records fail
+  validation rather than being silently repaired with a mixture of old and new
+  fields.
+- First-run admin bootstrap needs the owner password long enough to establish
+  the initial grant while keeping it out of Compose YAML, argv, logs, Git, and
+  shell environment variables.
+- The playbook has to preserve one public issuer across browser and backchannel
+  traffic while explaining that transport routing may differ.
+
+### What warrants a second pair of eyes
+
+- Review whether `172.16.0.0/12` is acceptably narrow for the isolated local
+  Docker listener; production must use the actual proxy network.
+- Review lifecycle handling for the bootstrap owner-password file after the
+  first successful bootstrap.
+- Diagnose the unexplained supervised Compose exit in a fresh session before
+  checking the admin smoke and complete acceptance tasks.
+- Review the shared skill change independently because it affects future
+  repositories, not only tiny-idp.
+
+### What should be done in the future
+
+- Complete the admin endpoint smoke test and browser CA export after the launch
+  failure is understood.
+- Move shared-two-apps and Jitsi from their local secret generators to the same
+  Vault materialization contract.
+- Implement an explicit guarded state-reset command per persistent profile.
+- Run the per-profile matrix and record teardown/state-preservation evidence.
+
+### Code review instructions
+
+- Review `devctl/operations.py` and
+  `devctl/tests/test_operations.py` for initialization and repeat promotion.
+- Review `examples/tinyidp-admin-console/compose.yaml` for listener, volumes,
+  secret mounts, and first-run bootstrap.
+- Run `python3 -m unittest discover -s devctl/tests -v`.
+- Run `go test ./cmd/tinyidp/doc` and
+  `go run ./cmd/tinyidp help tutorial-local-development-apps`.
+- Do not mark the admin runtime smoke as passing until `/readyz`, `/admin`, and
+  the unauthenticated API boundaries have been exercised through Caddy.

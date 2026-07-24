@@ -80,3 +80,19 @@ Step 17: Added Vault secret materialization and guarded Caddy storage backup/res
 
 - /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/devctl/operations.py — Security-sensitive operations
 - /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/devctl/tests/test_operations.py — Recovery and materialization tests
+
+## 2026-07-24
+
+Step 18: Added CAS-protected secret initialization, repeat-safe atomic
+materialization, the production-shaped admin-console environment, persistent
+Caddy PKI wiring, bootstrap/CA/smoke scripts, and the embedded Glazed local
+application tutorial (commit 62dcb14). Unit, Compose-config, manifest, help, and
+pre-commit test/lint gates passed. Runtime smoke remains unchecked because the
+second supervised Compose launch exited during the cached build without a
+diagnostic; server debugging stopped under the repository's two-attempt rule.
+
+### Related Files
+
+- /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/examples/tinyidp-admin-console/compose.yaml — Production-shaped local admin stack
+- /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/cmd/tinyidp/doc/pages/tutorial-local-development-apps.md — Embedded Glazed playbook
+- /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/ttmp/2026/07/23/TINYIDP-ADMIN-CONSOLE-001--design-the-tinyidp-administration-backend-and-widget-dsl-console-mvp/reference/01-investigation-diary.md — Detailed evidence, failures, and review instructions
