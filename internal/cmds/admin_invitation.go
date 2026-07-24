@@ -2,8 +2,7 @@ package cmds
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -18,21 +17,24 @@ import (
 	"github.com/go-go-golems/glazed/pkg/types"
 	"github.com/spf13/cobra"
 
-	"github.com/go-go-golems/tiny-idp/pkg/idp"
-	"github.com/go-go-golems/tiny-idp/pkg/idpinvite"
-	"github.com/go-go-golems/tiny-idp/pkg/sqlitestore"
+	"github.com/go-go-golems/tiny-idp/pkg/idpadmin"
+	"github.com/go-go-golems/tiny-idp/pkg/idpadminapp"
 )
 
 type adminInvitationIssueSettings struct {
 	Audience      string `glazed:"audience"`
-	PolicyVersion string `glazed:"policy-version"`
+	Label         string `glazed:"label"`
 	TTL           string `glazed:"ttl"`
 	LookupKeyFile string `glazed:"lookup-key-file"`
+	ActionKeyFile string `glazed:"admin-action-key-file"`
 }
 
 type adminInvitationRevokeSettings struct {
+	InvitationID  string `glazed:"invitation-id"`
+	Reason        string `glazed:"reason"`
+	Confirmation  string `glazed:"confirm"`
 	LookupKeyFile string `glazed:"lookup-key-file"`
-	CodeFile      string `glazed:"code-file"`
+	ActionKeyFile string `glazed:"admin-action-key-file"`
 }
 
 type AdminInvitationIssueCommand struct {
@@ -48,7 +50,7 @@ type AdminInvitationRevokeCommand struct {
 }
 
 func newAdminInvitationCommand(dbPath *string) (*cobra.Command, error) {
-	root := &cobra.Command{Use: "invitation", Short: "Issue and revoke durable signup invitations"}
+	root := &cobra.Command{Use: "invitation", Short: "Issue and revoke durable signup invitations through guarded commands"}
 	issue, err := newAdminInvitationIssueCommand(dbPath)
 	if err != nil {
 		return nil, err
@@ -90,9 +92,10 @@ func newAdminInvitationIssueCommand(dbPath *string) (*AdminInvitationIssueComman
 		cmds.WithShort("Issue a one-time signup invitation and print its raw code once"),
 		cmds.WithFlags(
 			fields.New("audience", fields.TypeString, fields.WithRequired(true), fields.WithHelp("Exact OIDC client ID allowed to redeem the invitation")),
-			fields.New("policy-version", fields.TypeString, fields.WithDefault("signup-invite-v1"), fields.WithHelp("Reviewed signup invitation policy version")),
-			fields.New("ttl", fields.TypeString, fields.WithDefault("24h"), fields.WithHelp("Invitation lifetime")),
-			fields.New("lookup-key-file", fields.TypeString, fields.WithRequired(true), fields.WithHelp("Owner-only file containing the durable invitation HMAC lookup key")),
+			fields.New("label", fields.TypeString, fields.WithRequired(true), fields.WithHelp("Non-secret operator label")),
+			fields.New("ttl", fields.TypeString, fields.WithDefault("24h"), fields.WithHelp("Invitation lifetime, at most 30 days")),
+			fields.New("lookup-key-file", fields.TypeString, fields.WithRequired(true), fields.WithHelp("Owner-only durable invitation HMAC key file")),
+			fields.New("admin-action-key-file", fields.TypeString, fields.WithRequired(true), fields.WithHelp("Owner-only action-handle key file")),
 		),
 		cmds.WithSections(output, command),
 	)
@@ -105,79 +108,84 @@ func newAdminInvitationRevokeCommand(dbPath *string) (*AdminInvitationRevokeComm
 		return nil, err
 	}
 	description := cmds.NewCommandDescription("revoke",
-		cmds.WithShort("Revoke one unused signup invitation read from an owner-only file"),
+		cmds.WithShort("Revoke an unused signup invitation by public invitation ID"),
 		cmds.WithFlags(
-			fields.New("lookup-key-file", fields.TypeString, fields.WithRequired(true), fields.WithHelp("Owner-only file containing the durable invitation HMAC lookup key")),
-			fields.New("code-file", fields.TypeString, fields.WithRequired(true), fields.WithHelp("Owner-only file containing exactly the invitation code to revoke")),
+			fields.New("invitation-id", fields.TypeString, fields.WithRequired(true), fields.WithHelp("Public invitation ID from issue/list output")),
+			fields.New("reason", fields.TypeString, fields.WithRequired(true), fields.WithHelp("Operator reason recorded in action evidence")),
+			fields.New("confirm", fields.TypeString, fields.WithRequired(true), fields.WithHelp("Type REVOKE")),
+			fields.New("lookup-key-file", fields.TypeString, fields.WithRequired(true), fields.WithHelp("Owner-only durable invitation HMAC key file")),
+			fields.New("admin-action-key-file", fields.TypeString, fields.WithRequired(true), fields.WithHelp("Owner-only action-handle key file")),
 		),
 		cmds.WithSections(output, command),
 	)
 	return &AdminInvitationRevokeCommand{CommandDescription: description, dbPath: dbPath, now: time.Now}, nil
 }
 
-func (c *AdminInvitationIssueCommand) RunIntoGlazeProcessor(ctx context.Context, vals *values.Values, processor middlewares.Processor) error {
+func (c *AdminInvitationIssueCommand) RunIntoGlazeProcessor(
+	ctx context.Context,
+	vals *values.Values,
+	processor middlewares.Processor,
+) error {
 	var cfg adminInvitationIssueSettings
 	if err := vals.DecodeSectionInto(schema.DefaultSlug, &cfg); err != nil {
 		return err
 	}
-	ttl, err := time.ParseDuration(cfg.TTL)
-	if err != nil || ttl <= 0 || strings.TrimSpace(cfg.PolicyVersion) == "" {
-		return fmt.Errorf("invitation ttl must be positive and policy-version is required")
+	if _, err := time.ParseDuration(cfg.TTL); err != nil {
+		return fmt.Errorf("parse invitation ttl: %w", err)
 	}
-	service, closeFn, err := openInvitationService(valueOf(c.dbPath), cfg.LookupKeyFile)
+	runtime, err := openAdminCommandRuntime(ctx, valueOf(c.dbPath), cfg.ActionKeyFile, cfg.LookupKeyFile)
 	if err != nil {
 		return err
 	}
-	defer closeFn()
-	id, err := randomAdminToken(18)
+	defer runtime.close()
+	response, err := runtime.executeCommand(ctx, runtime.invitations,
+		idpadminapp.CommandInvitationsIssue, "", map[string]any{
+			"audience": strings.TrimSpace(cfg.Audience), "label": strings.TrimSpace(cfg.Label),
+			"valid_for": strings.TrimSpace(cfg.TTL),
+		})
 	if err != nil {
 		return err
 	}
-	code, err := randomAdminToken(32)
-	if err != nil {
+	var result idpadmin.OneTimeSecretResult
+	if err := json.Unmarshal(response, &result); err != nil {
 		return err
 	}
-	now := c.now().UTC()
-	expiresAt := now.Add(ttl)
-	if err := service.Issue(ctx, idpinvite.DurableIssue{Code: code, ID: id, Audience: cfg.Audience, PolicyVersion: cfg.PolicyVersion, ExpiresAt: expiresAt}); err != nil {
-		return err
-	}
-	if err := processor.AddRow(ctx, types.NewRow(
-		types.MRP("status", "issued"), types.MRP("invitation_id", id), types.MRP("audience", cfg.Audience),
-		types.MRP("policy_version", cfg.PolicyVersion), types.MRP("expires_at", expiresAt), types.MRP("code", code),
-	)); err != nil {
-		return err
-	}
-	if err := emitAdminAudit(ctx, valueOf(c.dbPath), idp.Event{Time: now, Name: "signup_invitation.issued", ClientID: cfg.Audience, Result: "accepted", Fields: map[string]string{"invitation_id": id, "policy_version": cfg.PolicyVersion, "expires_at": expiresAt.Format(time.RFC3339)}}); err != nil {
-		return err
-	}
-	return nil
+	return processor.AddRow(ctx, types.NewRow(
+		types.MRP("status", "issued"), types.MRP("invitation_id", result.ResourceID),
+		types.MRP("audience", cfg.Audience), types.MRP("code", result.Secret),
+	))
 }
 
-func (c *AdminInvitationRevokeCommand) RunIntoGlazeProcessor(ctx context.Context, vals *values.Values, processor middlewares.Processor) error {
+func (c *AdminInvitationRevokeCommand) RunIntoGlazeProcessor(
+	ctx context.Context,
+	vals *values.Values,
+	processor middlewares.Processor,
+) error {
 	var cfg adminInvitationRevokeSettings
 	if err := vals.DecodeSectionInto(schema.DefaultSlug, &cfg); err != nil {
 		return err
 	}
-	code, err := readOwnerOnlySecret(cfg.CodeFile)
-	if err != nil {
-		return fmt.Errorf("read invitation code file: %w", err)
-	}
-	defer clearProductionSecret(code)
-	service, closeFn, err := openInvitationService(valueOf(c.dbPath), cfg.LookupKeyFile)
+	runtime, err := openAdminCommandRuntime(ctx, valueOf(c.dbPath), cfg.ActionKeyFile, cfg.LookupKeyFile)
 	if err != nil {
 		return err
 	}
-	defer closeFn()
-	now := c.now().UTC()
-	revoked, err := service.Revoke(ctx, string(code), now)
+	defer runtime.close()
+	response, err := runtime.executeCommand(ctx, runtime.invitations,
+		idpadminapp.CommandInvitationsRevoke, strings.TrimSpace(cfg.InvitationID),
+		map[string]any{"reason": cfg.Reason, "confirmation": cfg.Confirmation})
 	if err != nil {
 		return err
 	}
-	if err := emitAdminAudit(ctx, valueOf(c.dbPath), idp.Event{Time: now, Name: "signup_invitation.revoked", ClientID: revoked.Audience, Result: "accepted", Fields: map[string]string{"invitation_id": revoked.InvitationID, "policy_version": revoked.PolicyVersion}}); err != nil {
+	var result idpadmin.InvitationResult
+	if err := json.Unmarshal(response, &result); err != nil {
 		return err
 	}
-	return processor.AddRow(ctx, types.NewRow(types.MRP("status", "revoked"), types.MRP("invitation_id", revoked.InvitationID), types.MRP("audience", revoked.Audience), types.MRP("policy_version", revoked.PolicyVersion), types.MRP("revoked_at", revoked.RevokedAt)))
+	return processor.AddRow(ctx, types.NewRow(
+		types.MRP("status", result.Invitation.Status),
+		types.MRP("invitation_id", result.Invitation.ID),
+		types.MRP("audience", result.Invitation.Audience),
+		types.MRP("revoked_at", result.Invitation.RevokedAt),
+	))
 }
 
 func valueOf(value *string) string {
@@ -185,36 +193,4 @@ func valueOf(value *string) string {
 		return ""
 	}
 	return *value
-}
-
-func openInvitationService(dbPath, lookupKeyFile string) (*idpinvite.DurableService, func(), error) {
-	if strings.TrimSpace(dbPath) == "" {
-		return nil, nil, fmt.Errorf("--db is required")
-	}
-	key, err := readOwnerOnlySecret(lookupKeyFile)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer clearProductionSecret(key)
-	store, err := sqlitestore.Open(context.Background(), sqlitestore.DefaultConfig(dbPath))
-	if err != nil {
-		return nil, nil, err
-	}
-	service, err := idpinvite.NewDurableService(store, key)
-	if err != nil {
-		_ = store.Close()
-		return nil, nil, err
-	}
-	return service, func() { _ = store.Close() }, nil
-}
-
-func randomAdminToken(size int) (string, error) {
-	if size <= 0 {
-		return "", fmt.Errorf("random token size must be positive")
-	}
-	value := make([]byte, size)
-	if _, err := rand.Read(value); err != nil {
-		return "", fmt.Errorf("generate invitation token: %w", err)
-	}
-	return base64.RawURLEncoding.EncodeToString(value), nil
 }

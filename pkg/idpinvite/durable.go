@@ -77,13 +77,49 @@ func (s *DurableService) Issue(ctx context.Context, issue DurableIssue) error {
 	if err := validateIssue(issue); err != nil {
 		return err
 	}
-	return s.store.CreateDurableInvitation(ctx, idpstore.DurableInvitation{
+	return s.IssueInTransaction(ctx, s.store, issue)
+}
+
+// IssueInTransaction derives the private lookup hash and writes through the
+// caller-owned transaction. The hash never crosses the idpinvite boundary.
+func (s *DurableService) IssueInTransaction(ctx context.Context, store idpstore.DurableInvitationStore, issue DurableIssue) error {
+	if s == nil || store == nil {
+		return errors.New("durable invitation service is unavailable")
+	}
+	if err := validateIssue(issue); err != nil {
+		return err
+	}
+	return store.CreateDurableInvitation(ctx, idpstore.DurableInvitation{
 		CodeHash:      s.codeHash(issue.Code),
 		ID:            issue.ID,
 		Audience:      issue.Audience,
 		PolicyVersion: issue.PolicyVersion,
 		ExpiresAt:     issue.ExpiresAt.UTC(),
 	})
+}
+
+// RevokeByIDInTransaction resolves the private keyed hash inside the protocol
+// store and revokes the invitation using only its public administration ID.
+func (s *DurableService) RevokeByIDInTransaction(
+	ctx context.Context,
+	store idpstore.DurableInvitationStore,
+	invitationID string,
+	now time.Time,
+) (DurableRevocation, error) {
+	if s == nil || store == nil || !validText(invitationID) || now.IsZero() {
+		return DurableRevocation{}, errors.New("durable invitation revocation request is invalid")
+	}
+	invitation, err := store.RevokeDurableInvitationByID(ctx, invitationID, now.UTC())
+	if err != nil {
+		return DurableRevocation{}, err
+	}
+	if invitation.RevokedAt == nil {
+		return DurableRevocation{}, errors.New("durable invitation revocation was not persisted")
+	}
+	return DurableRevocation{
+		InvitationID: invitation.ID, Audience: invitation.Audience,
+		PolicyVersion: invitation.PolicyVersion, RevokedAt: invitation.RevokedAt.UTC(),
+	}, nil
 }
 
 // Inspect validates current invitation state without mutating it. A later

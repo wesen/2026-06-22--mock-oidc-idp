@@ -22,6 +22,27 @@ export interface AdminPageData {
   items?: AdminListItem[];
 }
 
+export interface OneTimeSecretResult {
+  resource_id: string;
+  secret: string;
+}
+
+export interface ClientDetail {
+  id: string;
+  public: boolean;
+  disabled: boolean;
+  require_pkce: boolean;
+  secret_configured: boolean;
+  updated_at: string;
+  version: number;
+  redirect_uris: string[];
+  post_logout_redirect_uris: string[];
+  allowed_scopes: string[];
+  allowed_grant_types: string[];
+  allowed_audiences: string[];
+  can_introspect: boolean;
+}
+
 export interface PreparedAction {
   action_handle: string;
   command: string;
@@ -48,6 +69,9 @@ export const adminApi = createApi({
     }),
     pageData: builder.query<AdminPageData, { page: string; search: string }>({
       query: ({ page, search }) => `api/admin/pages/${encodeURIComponent(page)}${search}`,
+    }),
+    clientDetail: builder.query<ClientDetail, string>({
+      query: (clientId) => `api/admin/clients/${encodeURIComponent(clientId)}`,
     }),
     prepareAction: builder.mutation<
       PreparedAction,
@@ -82,6 +106,7 @@ export const {
   useSessionQuery,
   useWidgetPageQuery,
   usePageDataQuery,
+  useClientDetailQuery,
   usePrepareActionMutation,
   useExecuteActionMutation,
 } = adminApi;

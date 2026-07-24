@@ -89,7 +89,7 @@ func (s *UserCommandService) Execute(
 	if err != nil {
 		return nil, err
 	}
-	definition, ok := userActionDefinition(claims.Command)
+	definition, ok := actionDefinition(claims.Command)
 	if !ok || definition.Capability != claims.Capability ||
 		definition.TargetType != claims.TargetType ||
 		definition.RequireFresh != claims.RequireFresh {

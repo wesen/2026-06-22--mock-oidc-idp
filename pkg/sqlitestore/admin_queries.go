@@ -235,7 +235,13 @@ func (s *Store) ListAdminInvitations(ctx context.Context, now time.Time, limit i
 		row := idpadmin.InvitationRow{
 			ID: invitation.ID, Audience: invitation.Audience, Status: status,
 			ExpiresAt: invitation.ExpiresAt, RevokedAt: invitation.RevokedAt,
-			RedeemedAt: invitation.RedeemedAt, Version: 1,
+			RedeemedAt: invitation.RedeemedAt,
+		}
+		version, versionErr := s.GetResourceVersion(ctx, "invitation", invitation.ID)
+		if versionErr == nil {
+			row.Version = version
+		} else if !errors.Is(versionErr, idpadminstore.ErrNotFound) {
+			return nil, versionErr
 		}
 		if value, ok := metadataByID[invitation.ID]; ok {
 			row.Label = value.label

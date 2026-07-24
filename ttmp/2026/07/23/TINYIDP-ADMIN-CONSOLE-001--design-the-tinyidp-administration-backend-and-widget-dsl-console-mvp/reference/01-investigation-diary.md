@@ -26,12 +26,20 @@ RelatedFiles:
       Note: OIDC PKCE, encrypted auth attempt, admin session, current-grant, and CSRF boundary
     - Path: repo://internal/adminweb/auth_test.go
       Note: Login, callback, cookie, session, CSRF, return-path, and grant invalidation tests
+    - Path: repo://internal/adminweb/frontend/src/ClientManagement.tsx
+      Note: Application administration and one-time secret UI
+    - Path: repo://internal/adminweb/frontend/src/InvitationManagement.tsx
+      Note: Invitation administration and one-time code UI
     - Path: repo://internal/cmds/admin.go
       Note: Registers the console operator command group
+    - Path: repo://internal/cmds/admin_client.go
+      Note: Shared guarded client CLI
     - Path: repo://internal/cmds/admin_console.go
       Note: Glazed console owner lifecycle commands
     - Path: repo://internal/cmds/admin_console_test.go
       Note: Glazed command wiring and lifecycle tests
+    - Path: repo://internal/cmds/admin_invitation.go
+      Note: Shared guarded invitation CLI
     - Path: repo://internal/cmds/serve_production.go
       Note: Evidence for public and internal listener boundaries
     - Path: repo://pkg/idp/audit.go
@@ -46,10 +54,18 @@ RelatedFiles:
       Note: Administration scopes, capabilities, principals, grants, and server-side authorization
     - Path: repo://pkg/idpadmin/model_test.go
       Note: Authorization and action-handle security tests
+    - Path: repo://pkg/idpadminapp/client_commands.go
+      Note: Guarded client lifecycle and one-time secret rotation
+    - Path: repo://pkg/idpadminapp/commands.go
+      Note: Closed signed-handle command dispatcher
     - Path: repo://pkg/idpadminapp/executor.go
       Note: Atomic authorized mutation, replay, CAS, idempotency, evidence, and outbox pipeline
     - Path: repo://pkg/idpadminapp/executor_test.go
       Note: Mutation atomicity, rollback, retry, conflict, and one-time-secret tests
+    - Path: repo://pkg/idpadminapp/invitation_client_commands_test.go
+      Note: Phase D lifecycle leakage replay and validation evidence
+    - Path: repo://pkg/idpadminapp/invitation_commands.go
+      Note: Guarded invitation issuance and public-ID revocation
     - Path: repo://pkg/idpadminapp/owner.go
       Note: Owner bootstrap, status, grant revocation, and session recovery orchestration
     - Path: repo://pkg/idpadminapp/owner_test.go
@@ -68,6 +84,8 @@ RelatedFiles:
       Note: Durable administration control-plane schema
     - Path: repo://pkg/sqlitestore/migrations/017_admin_user_projection.sql
       Note: Indexed administration user query projection
+    - Path: repo://pkg/sqlitestore/migrations/019_admin_invitation_lookup.sql
+      Note: Public invitation ID lookup migration and backfill
     - Path: repo://ttmp/2026/07/23/TINYIDP-ADMIN-CONSOLE-001--design-the-tinyidp-administration-backend-and-widget-dsl-console-mvp/sources/local/tiny-idp-ux.md
       Note: Imported source read in full
 ExternalSources: []
@@ -76,6 +94,7 @@ LastUpdated: 2026-07-23T20:14:57.931345362-04:00
 WhatFor: Preserve how the administration-backend proposal was derived, including concrete evidence, failed assumptions, and review instructions.
 WhenToUse: Read when reviewing the design, implementing a phase, or continuing the investigation.
 ---
+
 
 
 
@@ -1451,3 +1470,298 @@ execute action
   -> COMMIT
   -> return {committed:true,audit_status:"pending",user:{...}}
 ```
+
+## Step 10: Begin Phase D with transaction-safe invitation and client commands
+
+Phase D began by extending the Phase C action envelope rather than creating
+separate mutation paths. The first checkpoint implements the protocol/store
+boundary, closed command registry, invitation/client command services,
+production dispatcher wiring, resource versions, and focused lifecycle tests.
+The frontend and CLI are deliberately still in progress at this point.
+
+### Prompt Context
+
+**User prompt (verbatim):** "implement the ticket, keep a detailed diary as you
+work, commit at appropriate intervals."
+
+**Assistant interpretation:** Continue through every implementation phase,
+record both design reasoning and execution evidence, and checkpoint only
+coherent reviewed increments.
+
+**Inferred user intent:** Deliver the administration console described by the
+ticket, not a reduced prototype or a documentation-only result.
+
+### What I did
+
+- Re-read the Phase D ticket requirements, current clean branch state,
+  invitation CLI, legacy client service, durable invitation service, SQLite
+  store, safe page models, and Phase C action/executor contracts.
+- Added append-only migration
+  `019_admin_invitation_lookup.sql`. It adds a unique public
+  `invitation_id` lookup beside the existing private keyed code hash and
+  backfills IDs from the durable JSON record.
+- Extended the protocol store with `GetDurableInvitationByID` and
+  `RevokeDurableInvitationByID`, implemented in SQLite and memory stores.
+- Added `IssueInTransaction` and `RevokeByIDInTransaction` to
+  `idpinvite.DurableService`. Code HMAC derivation remains inside
+  `idpinvite`; neither the admin command layer nor metadata receives a code
+  hash.
+- Added transaction-scoped admin invitation metadata insertion with label,
+  creator subject, creation time, and last-issued time.
+- Generalized `ActionService` from user-only definitions to a closed registry
+  covering:
+  - `invitations.issue` and `invitations.revoke`;
+  - `clients.create`, `clients.update`, `clients.enable`,
+    `clients.disable`, and `clients.rotate_secret`.
+- Distinguished generated targets, caller-supplied create targets, and
+  existing versioned targets. Client creation checks nonexistence before
+  minting; every existing invitation/client operation binds its current
+  resource version.
+- Added `InvitationCommandService`:
+  - generated 288-bit one-time codes;
+  - bounded 30-day validity;
+  - audience client validation;
+  - atomic durable invitation, metadata, version, action, outbox, and
+    idempotency writes;
+  - public-ID revocation with reason and typed `REVOKE`;
+  - secret-bearing replay refusal.
+- Added `ClientCommandService`:
+  - create/update/enable/disable/rotate flows;
+  - production-mode redirect, audience, grant, public-client, PKCE, and
+    introspection validation;
+  - bcrypt preparation outside the transaction;
+  - immutable public/confidential client type;
+  - immediate secret-hash replacement;
+  - safe typed results that never include `SecretHash`;
+  - secret-bearing create/rotation replay refusal.
+- Added a signed-handle `CommandDispatcher` and changed the HTTP handler from a
+  user-specific executor to the unified command executor.
+- Made the invitation lookup key a production administration requirement,
+  constructed the durable service unconditionally, and initialized versions
+  for catalog clients and pre-existing durable invitations at startup.
+- Added focused tests covering invitation issuance/revocation, code secrecy,
+  replay refusal, client creation/update/disable/rotation, old-secret
+  invalidation, new-secret verification, and unsafe redirect rejection.
+
+### Why
+
+- Revocation by a raw invitation code would force administrators to retain a
+  bearer secret and would make list-to-revoke impossible. Resolving the public
+  ID inside the protocol store preserves the secrecy boundary.
+- Invitation issuance and confidential-client secret creation are committed
+  mutations whose response cannot be replayed. They therefore need the
+  executor's `SecretBearing` policy, not ordinary durable response caching.
+- Client configuration changes affect OAuth security immediately. They need
+  the same grant reload, signed authority, CAS, nonce, idempotency, action
+  evidence, and audit outbox transaction as user mutations.
+- Existing client catalog rows predate the admin version table. Startup
+  initialization is required before an existing client can receive a signed
+  update handle.
+
+### What worked
+
+- The invitation design required no raw-code or private-hash column in
+  `admin_invitation_records`; the protocol table owns the internal mapping.
+- The existing executor's secret sentinel behaved exactly as intended:
+  first execution returns the secret in memory, while same-key retries receive
+  `ErrSecretAlreadyIssued` and the idempotency row contains only a sentinel.
+- Focused package tests passed after the store interfaces were implemented in
+  both SQLite and memory:
+
+  ```text
+  ok github.com/go-go-golems/tiny-idp/pkg/idpadminapp
+  ok github.com/go-go-golems/tiny-idp/pkg/idpinvite
+  ok github.com/go-go-golems/tiny-idp/pkg/sqlitestore
+  ok github.com/go-go-golems/tiny-idp/internal/adminweb
+  ```
+
+- The final focused Phase D command test passed:
+
+  ```text
+  ok github.com/go-go-golems/tiny-idp/pkg/idpadminapp 2.783s
+  ```
+
+### What didn't work
+
+- The first test run never reached compilation because the default Go cache is
+  outside the writable workspace:
+
+  ```text
+  open /home/manuel/.cache/go-build/...: read-only file system
+  ```
+
+  Subsequent commands use `GOCACHE=/tmp/tiny-idp-go-cache`. This is only a
+  sandbox test setting; product code does not read an environment variable.
+
+- Extending `DurableInvitationStore` initially broke the memory store's
+  compile-time interface assertion:
+
+  ```text
+  *Store does not implement idpstore.Store
+  (missing method GetDurableInvitationByID)
+  ```
+
+  The memory implementation now performs the same public-ID resolution and
+  revocation semantics.
+
+- The first admin metadata implementation referenced a nonexistent helper and
+  omitted the `strings` import:
+
+  ```text
+  undefined: strings
+  undefined: mapAdminWriteError
+  ```
+
+  It now maps SQLite uniqueness through the existing `isConstraint` helper.
+
+- The initial leakage-test queries guessed `payload` and `response`; the
+  schema names are `payload_json` and `response_json`:
+
+  ```text
+  no such column: payload
+  no such column: response
+  ```
+
+  Correcting those test-only column names made the focused suite pass.
+
+- The broad `internal/cmds` package run reached an unrelated network sandbox
+  restriction:
+
+  ```text
+  httptest: failed to listen on a port:
+  listen tcp6 [::1]:0: socket: operation not permitted
+  ```
+
+  That package must be rerun outside the restricted sandbox during the
+  checkpoint verification.
+
+### What I learned
+
+- The durable invitation JSON uses exported Go field names, so migration 019
+  must backfill with JSON path `$.ID`, not a guessed snake-case path.
+- Action preparation needs three target modes: server-generated identity,
+  caller-selected identity whose nonexistence is checked, and an existing
+  versioned resource. A single `RequireTarget` flag cannot express all three.
+- Secret hashes can be prepared before a short SQLite transaction without
+  weakening CAS because the executor repeats authorization and performs the
+  version comparison inside the transaction.
+- `INSERT OR REPLACE` for clients makes the aggregate version table the
+  authoritative concurrency guard; client timestamps alone cannot prevent
+  stale-tab overwrites.
+
+### What is next
+
+- Phase E will add key and operational workflows, outbox delivery, and health
+  reporting on top of the same executor.
+
+### Phase D continuation and completion
+
+After the repository-mandated debugging pause, the callback-scoped SQLite
+query fix was rerun without further edits. The CLI lifecycle suite passed,
+proving that the hang was caused by querying the root one-connection store
+from inside `AdminUpdate`, not by invitation or client command logic:
+
+```text
+PASS TestAdminClientMutationsUseGuardedCommandLayer
+PASS TestAdminInvitationIssueAndRevokeUseGuardedCommandLayer
+PASS TestAdminUserMutationsUseGuardedCommandLayer
+ok github.com/go-go-golems/tiny-idp/internal/cmds 2.807s
+```
+
+The remaining Phase D work then added:
+
+- `InvitationManagement.tsx` with issue/list/revoke forms, an explicit
+  one-time code warning, and a clear action;
+- `ClientManagement.tsx` with multiline repeatable URI/scope/grant/audience
+  inputs, create/edit/enable/disable/rotate operations, and one-time secret
+  handling;
+- immediate RTK Query mutation reset after extracting a one-time response, so
+  the Redux cache never retains the code or secret;
+- an authenticated, capability-checked safe client-detail endpoint which
+  returns `ClientDetail` and never a hash;
+- `ValidationError` and HTTP 422 `field_errors`, including exact
+  `redirect_uris` attribution for wildcard/invalid/HTTP/fragment failures;
+- shared guarded CLI implementations for invitation and client mutations;
+- generated confidential-client secrets only. The old CLI secret flag/file
+  path and its platform-specific readers were removed rather than retained as
+  a compatibility route;
+- integration tests that prove CLI mutations create action evidence and
+  resource-version progress.
+
+The frontend gate passed:
+
+```text
+pnpm --dir internal/adminweb/frontend run check
+tsc --noEmit
+vite build
+✓ built in 527ms
+```
+
+The complete lint gate passed with zero issues. The first sandboxed invocation
+could not download the pinned `glazed-lint` because DNS/socket access is
+restricted, so the approved out-of-sandbox retry was used:
+
+```text
+Issues before processing: 150, after processing: 0
+0 issues.
+```
+
+The first full test run found that the external two-process production harness
+still launched `serve-production` without the Phase B administration key
+files. It failed before readiness with:
+
+```text
+required field(s) missing:
+production.admin-auth-key-file, production.admin-action-key-file
+```
+
+The harness now creates owner-only auth, action, and invitation key files and
+passes them explicitly. Its affected package passed:
+
+```text
+ok .../scripts/01-two-process-harness 16.841s
+```
+
+Making the invitation lookup key an unconditional administration requirement
+also invalidated a legacy schema assertion that described it as conditional.
+The help text, required flag definition, and assertion now state its dual use
+for durable signup and console issuance. The production command and section
+tests passed after that intentional contract update.
+
+### Phase D review instructions
+
+- Follow `ActionService.Prepare` through `CommandDispatcher` into
+  `InvitationCommandService` and `ClientCommandService`.
+- Confirm migration 019 exposes only public invitation IDs and that keyed code
+  hashes remain in `durable_invitations`.
+- Inspect `Executor` secret-bearing response storage and the leakage assertions
+  against actions, outbox, and idempotency tables.
+- Compare the React one-time response handling with `execution.reset()` in
+  both resource components.
+- Run the frontend check, full Go suite, `make lint`, and the pre-commit hook.
+
+The final full repository test rerun passed, including the real two-process
+production harness and every package under `./...`:
+
+```text
+GOCACHE=/tmp/tiny-idp-go-cache go test ./... -count=1
+exit 0
+```
+
+This establishes that Phase D's required production keys, migration 019,
+expanded store interface, command routing, and removed client-secret-file CLI
+surface do not leave a failing consumer elsewhere in the repository.
+
+The first staged hook invocation inherited the sandbox's read-only default Go
+cache and restricted DNS, so both hooks failed before analyzing the change.
+The approved rerun set the isolated cache and executed outside that restriction:
+
+```text
+GOCACHE=/tmp/tiny-idp-go-cache lefthook run pre-commit
+✔ lint
+✔ test
+```
+
+The separate build gate passed with `-buildvcs=false`; that flag suppresses
+only Go's unavailable linked-worktree VCS stamp and does not change compiled
+application behavior.

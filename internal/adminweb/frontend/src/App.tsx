@@ -5,6 +5,8 @@ import {
 } from "@go-go-golems/rag-evaluation-site";
 import { useSessionQuery, useWidgetPageQuery } from "./api";
 import { UserManagement } from "./UserManagement";
+import { InvitationManagement } from "./InvitationManagement";
+import { ClientManagement } from "./ClientManagement";
 
 const pages = [
   ["overview", "Overview"],
@@ -74,6 +76,8 @@ export function App() {
           <WidgetRenderer node={widget.data.root} registry={defaultWidgetRegistry} />
         )}
         {page === "users" && <UserManagement session={session.data} />}
+        {page === "invitations" && <InvitationManagement session={session.data} />}
+        {page === "clients" && <ClientManagement session={session.data} />}
       </main>
       <WidgetToastRegion />
     </div>

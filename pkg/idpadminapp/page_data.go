@@ -84,6 +84,25 @@ func (s *PageDataService) PageData(
 	}
 }
 
+func (s *PageDataService) ClientDetail(
+	ctx context.Context,
+	principal idpadmin.AdminPrincipal,
+	clientID string,
+) (idpadmin.ClientDetail, error) {
+	if err := s.authorize(ctx, principal, idpadmin.CapabilityClientsRead); err != nil {
+		return idpadmin.ClientDetail{}, err
+	}
+	client, err := s.store.GetClient(ctx, strings.TrimSpace(clientID))
+	if err != nil {
+		return idpadmin.ClientDetail{}, err
+	}
+	version, err := s.store.GetResourceVersion(ctx, "client", client.ID)
+	if err != nil {
+		return idpadmin.ClientDetail{}, err
+	}
+	return clientDetail(client, version), nil
+}
+
 func (s *PageDataService) authorize(ctx context.Context, principal idpadmin.AdminPrincipal, capability idpadmin.Capability) error {
 	if principal.GrantID == "" || principal.GrantVersion < 1 {
 		return idpadmin.ErrInvalidPrincipal

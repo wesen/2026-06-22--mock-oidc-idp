@@ -31,9 +31,9 @@
 
 ## Phase D — Invitations and applications
 
-- [ ] Add invitation metadata projection and one-time issuance/revocation.
-- [ ] Add client create/edit/enable/disable/secret-rotation flows.
-- [ ] Add one-time secret leakage and replay tests.
+- [x] Add invitation metadata projection and one-time issuance/revocation.
+- [x] Add client create/edit/enable/disable/secret-rotation flows.
+- [x] Add one-time secret leakage and replay tests.
 
 ## Phase E — Keys and operations
 

@@ -22,11 +22,29 @@ func (s *Store) CreateDurableInvitation(ctx context.Context, invitation idpstore
 	if err != nil {
 		return errors.Wrap(err, "encode durable invitation")
 	}
-	_, err = s.conn().ExecContext(ctx, `INSERT INTO durable_invitations(code_hash, expires_at_ns, data) VALUES(?, ?, ?)`, invitation.CodeHash, invitation.ExpiresAt.UTC().UnixNano(), data)
+	_, err = s.conn().ExecContext(ctx, `INSERT INTO durable_invitations(code_hash, invitation_id, expires_at_ns, data) VALUES(?, ?, ?, ?)`,
+		invitation.CodeHash, invitation.ID, invitation.ExpiresAt.UTC().UnixNano(), data)
 	if err != nil {
 		return idpstore.ErrDuplicate
 	}
 	return nil
+}
+
+func (s *Store) GetDurableInvitationByID(ctx context.Context, invitationID string) (idpstore.DurableInvitation, error) {
+	var data []byte
+	err := s.conn().QueryRowContext(ctx, `SELECT data FROM durable_invitations WHERE invitation_id=?`,
+		strings.TrimSpace(invitationID)).Scan(&data)
+	if errors.Is(err, sql.ErrNoRows) {
+		return idpstore.DurableInvitation{}, idpstore.ErrNotFound
+	}
+	if err != nil {
+		return idpstore.DurableInvitation{}, errors.Wrap(err, "load durable invitation by id")
+	}
+	invitation, err := dec[idpstore.DurableInvitation](data)
+	if err != nil {
+		return idpstore.DurableInvitation{}, errors.Wrap(err, "decode durable invitation")
+	}
+	return invitation, nil
 }
 
 func (s *Store) GetDurableInvitation(ctx context.Context, codeHash []byte) (idpstore.DurableInvitation, error) {
@@ -115,6 +133,26 @@ func (s *Store) RevokeDurableInvitation(ctx context.Context, codeHash []byte, no
 		return idpstore.ErrAlreadyConsumed
 	}
 	return nil
+}
+
+func (s *Store) RevokeDurableInvitationByID(ctx context.Context, invitationID string, now time.Time) (idpstore.DurableInvitation, error) {
+	if s.runner == nil {
+		var invitation idpstore.DurableInvitation
+		err := s.Update(ctx, func(tx idpstore.TxStore) error {
+			var err error
+			invitation, err = tx.RevokeDurableInvitationByID(ctx, invitationID, now)
+			return err
+		})
+		return invitation, err
+	}
+	invitation, err := s.GetDurableInvitationByID(ctx, invitationID)
+	if err != nil {
+		return idpstore.DurableInvitation{}, err
+	}
+	if err := s.RevokeDurableInvitation(ctx, invitation.CodeHash, now); err != nil {
+		return idpstore.DurableInvitation{}, err
+	}
+	return s.GetDurableInvitationByID(ctx, invitationID)
 }
 
 func validateDurableInvitation(invitation idpstore.DurableInvitation) error {

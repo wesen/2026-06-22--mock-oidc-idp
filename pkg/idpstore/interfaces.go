@@ -138,8 +138,10 @@ type DeviceGrantStore interface {
 type DurableInvitationStore interface {
 	CreateDurableInvitation(ctx context.Context, invitation DurableInvitation) error
 	GetDurableInvitation(ctx context.Context, codeHash []byte) (DurableInvitation, error)
+	GetDurableInvitationByID(ctx context.Context, invitationID string) (DurableInvitation, error)
 	RedeemDurableInvitation(ctx context.Context, codeHash []byte, audience string, now time.Time) (DurableInvitation, error)
 	RevokeDurableInvitation(ctx context.Context, codeHash []byte, now time.Time) error
+	RevokeDurableInvitationByID(ctx context.Context, invitationID string, now time.Time) (DurableInvitation, error)
 }
 
 type KeyStore interface {
@@ -192,6 +194,7 @@ type ReadStore interface {
 	GetDeviceGrantByUserCodeHash(ctx context.Context, userCodeHash []byte) (DeviceGrant, error)
 	InspectDeviceGrantByDeviceCodeHash(ctx context.Context, deviceCodeHash []byte, clientID string) (DeviceGrant, error)
 	GetDurableInvitation(ctx context.Context, codeHash []byte) (DurableInvitation, error)
+	GetDurableInvitationByID(ctx context.Context, invitationID string) (DurableInvitation, error)
 	ActiveSigningKey(ctx context.Context) (SigningKey, error)
 	VerificationKeys(ctx context.Context) ([]SigningKey, error)
 }

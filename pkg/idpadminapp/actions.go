@@ -8,16 +8,24 @@ import (
 
 	"github.com/go-go-golems/tiny-idp/pkg/idpadmin"
 	"github.com/go-go-golems/tiny-idp/pkg/idpadminstore"
+	"github.com/go-go-golems/tiny-idp/pkg/idpstore"
 )
 
 const (
-	CommandUsersCreate       = "users.create"
-	CommandUsersUpdate       = "users.update"
-	CommandUsersEnable       = "users.enable"
-	CommandUsersDisable      = "users.disable"
-	CommandUsersUnlock       = "users.unlock"
-	CommandUsersSetPassword  = "users.set_password"
-	CommandUsersRevokeAccess = "users.revoke_access"
+	CommandUsersCreate         = "users.create"
+	CommandUsersUpdate         = "users.update"
+	CommandUsersEnable         = "users.enable"
+	CommandUsersDisable        = "users.disable"
+	CommandUsersUnlock         = "users.unlock"
+	CommandUsersSetPassword    = "users.set_password"
+	CommandUsersRevokeAccess   = "users.revoke_access"
+	CommandInvitationsIssue    = "invitations.issue"
+	CommandInvitationsRevoke   = "invitations.revoke"
+	CommandClientsCreate       = "clients.create"
+	CommandClientsUpdate       = "clients.update"
+	CommandClientsEnable       = "clients.enable"
+	CommandClientsDisable      = "clients.disable"
+	CommandClientsRotateSecret = "clients.rotate_secret"
 )
 
 var (
@@ -35,6 +43,8 @@ type ActionDefinition struct {
 	RequireFresh     bool
 	RequireReason    bool
 	ConfirmationText string
+	GenerateTarget   bool
+	RequireExisting  bool
 }
 
 type PrepareActionRequest struct {
@@ -54,14 +64,19 @@ type PreparedAction struct {
 }
 
 type ActionService struct {
-	store      idpadminstore.Store
+	store      ActionStore
 	handles    *idpadmin.HandleService
 	authorizer *idpadmin.Authorizer
 	now        func() time.Time
 }
 
+type ActionStore interface {
+	idpadminstore.Store
+	idpstore.Store
+}
+
 func NewActionService(
-	store idpadminstore.Store,
+	store ActionStore,
 	handles *idpadmin.HandleService,
 	authorizer *idpadmin.Authorizer,
 	now func() time.Time,
@@ -80,7 +95,7 @@ func (s *ActionService) Prepare(
 	principal idpadmin.AdminPrincipal,
 	request PrepareActionRequest,
 ) (PreparedAction, error) {
-	definition, ok := userActionDefinition(request.Command)
+	definition, ok := actionDefinition(request.Command)
 	if !ok {
 		return PreparedAction{}, ErrUnknownCommand
 	}
@@ -96,15 +111,20 @@ func (s *ActionService) Prepare(
 	}
 	var expectedVersion int64
 	var err error
-	if definition.RequireTarget {
-		user, err := s.store.GetAdminUser(ctx, targetID)
+	if definition.RequireExisting {
+		expectedVersion, err = s.store.GetResourceVersion(ctx, definition.TargetType, targetID)
 		if err != nil {
 			return PreparedAction{}, err
 		}
-		expectedVersion = user.Version
-	} else if definition.Command == CommandUsersCreate {
+	} else if definition.GenerateTarget {
 		targetID, err = randomID()
 		if err != nil {
+			return PreparedAction{}, err
+		}
+	} else if definition.Command == CommandClientsCreate {
+		if _, err := s.store.GetClient(ctx, targetID); err == nil {
+			return PreparedAction{}, idpstore.ErrDuplicate
+		} else if !errors.Is(err, idpstore.ErrNotFound) {
 			return PreparedAction{}, err
 		}
 	}
@@ -134,37 +154,68 @@ func (s *ActionService) Prepare(
 	}, nil
 }
 
-func userActionDefinition(command string) (ActionDefinition, bool) {
+func actionDefinition(command string) (ActionDefinition, bool) {
 	definitions := map[string]ActionDefinition{
 		CommandUsersCreate: {
 			Command: CommandUsersCreate, Capability: idpadmin.CapabilityUsersCreate,
-			TargetType: "user",
+			TargetType: "user", GenerateTarget: true,
 		},
 		CommandUsersUpdate: {
 			Command: CommandUsersUpdate, Capability: idpadmin.CapabilityUsersUpdate,
-			TargetType: "user", RequireTarget: true,
+			TargetType: "user", RequireTarget: true, RequireExisting: true,
 		},
 		CommandUsersEnable: {
 			Command: CommandUsersEnable, Capability: idpadmin.CapabilityUsersDisable,
-			TargetType: "user", RequireTarget: true, RequireReason: true,
+			TargetType: "user", RequireTarget: true, RequireExisting: true, RequireReason: true,
 		},
 		CommandUsersDisable: {
 			Command: CommandUsersDisable, Capability: idpadmin.CapabilityUsersDisable,
-			TargetType: "user", RequireTarget: true,
+			TargetType: "user", RequireTarget: true, RequireExisting: true,
 			RequireReason: true, ConfirmationText: "DISABLE",
 		},
 		CommandUsersUnlock: {
 			Command: CommandUsersUnlock, Capability: idpadmin.CapabilityUsersUnlock,
-			TargetType: "user", RequireTarget: true, RequireReason: true,
+			TargetType: "user", RequireTarget: true, RequireExisting: true, RequireReason: true,
 		},
 		CommandUsersSetPassword: {
 			Command: CommandUsersSetPassword, Capability: idpadmin.CapabilityUsersPasswordSet,
-			TargetType: "user", RequireTarget: true, RequireFresh: true, RequireReason: true,
+			TargetType: "user", RequireTarget: true, RequireExisting: true, RequireFresh: true, RequireReason: true,
 		},
 		CommandUsersRevokeAccess: {
 			Command: CommandUsersRevokeAccess, Capability: idpadmin.CapabilityUsersAccessRevoke,
-			TargetType: "user", RequireTarget: true, RequireFresh: true,
+			TargetType: "user", RequireTarget: true, RequireExisting: true, RequireFresh: true,
 			RequireReason: true, ConfirmationText: "REVOKE",
+		},
+		CommandInvitationsIssue: {
+			Command: CommandInvitationsIssue, Capability: idpadmin.CapabilityInvitationsCreate,
+			TargetType: "invitation", GenerateTarget: true,
+		},
+		CommandInvitationsRevoke: {
+			Command: CommandInvitationsRevoke, Capability: idpadmin.CapabilityInvitationsRevoke,
+			TargetType: "invitation", RequireTarget: true, RequireExisting: true,
+			RequireReason: true, ConfirmationText: "REVOKE",
+		},
+		CommandClientsCreate: {
+			Command: CommandClientsCreate, Capability: idpadmin.CapabilityClientsCreate,
+			TargetType: "client", RequireTarget: true,
+		},
+		CommandClientsUpdate: {
+			Command: CommandClientsUpdate, Capability: idpadmin.CapabilityClientsUpdate,
+			TargetType: "client", RequireTarget: true, RequireExisting: true,
+		},
+		CommandClientsEnable: {
+			Command: CommandClientsEnable, Capability: idpadmin.CapabilityClientsDisable,
+			TargetType: "client", RequireTarget: true, RequireExisting: true, RequireReason: true,
+		},
+		CommandClientsDisable: {
+			Command: CommandClientsDisable, Capability: idpadmin.CapabilityClientsDisable,
+			TargetType: "client", RequireTarget: true, RequireExisting: true,
+			RequireReason: true, ConfirmationText: "DISABLE",
+		},
+		CommandClientsRotateSecret: {
+			Command: CommandClientsRotateSecret, Capability: idpadmin.CapabilityClientSecretRotate,
+			TargetType: "client", RequireTarget: true, RequireExisting: true,
+			RequireFresh: true, RequireReason: true, ConfirmationText: "ROTATE",
 		},
 	}
 	definition, ok := definitions[command]

@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-go-golems/tiny-idp/pkg/idpadmin"
@@ -332,6 +333,27 @@ func (s *Store) CompareAndIncrementResourceVersion(ctx context.Context, resource
 		return 0, idpadminstore.ErrVersionConflict
 	}
 	return expected + 1, nil
+}
+
+func (s *Store) CreateAdminInvitation(ctx context.Context, record idpadminstore.InvitationRecord) error {
+	if strings.TrimSpace(record.InvitationID) == "" ||
+		strings.TrimSpace(record.CreatedBySubject) == "" ||
+		record.CreatedAt.IsZero() || record.LastIssuedAt.IsZero() {
+		return fmt.Errorf("invalid administration invitation record")
+	}
+	_, err := s.conn().ExecContext(ctx, `
+		INSERT INTO admin_invitation_records
+			(invitation_id, label, created_by_subject, created_at_ns, last_issued_at_ns)
+		VALUES (?, ?, ?, ?, ?)`,
+		record.InvitationID, strings.TrimSpace(record.Label), record.CreatedBySubject,
+		record.CreatedAt.UTC().UnixNano(), record.LastIssuedAt.UTC().UnixNano())
+	if err != nil {
+		if isConstraint(err) {
+			return idpadminstore.ErrDuplicate
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *Store) PutIdempotencyRecord(ctx context.Context, record idpadminstore.IdempotencyRecord) error {

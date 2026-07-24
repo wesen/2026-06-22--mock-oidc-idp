@@ -3,6 +3,7 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"reflect"
 	"sort"
@@ -26,6 +27,60 @@ type adminUserProjection struct {
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
 	Version               int64
+}
+
+func (s *Store) InitializeAdminResourceVersions(ctx context.Context, now time.Time) error {
+	return s.AdminUpdate(ctx, func(protocol idpstore.TxStore, admin idpadminstore.TxStore) error {
+		scoped, ok := admin.(*Store)
+		if !ok {
+			return fmt.Errorf("unexpected admin transaction implementation")
+		}
+		clients, err := protocol.ListClients(ctx)
+		if err != nil {
+			return err
+		}
+		for _, client := range clients {
+			if _, err := admin.GetResourceVersion(ctx, "client", client.ID); err == nil {
+				continue
+			} else if !errors.Is(err, idpadminstore.ErrNotFound) {
+				return err
+			}
+			if err := admin.CreateResourceVersion(ctx, "client", client.ID, 1, now.UTC()); err != nil {
+				return err
+			}
+		}
+		rows, err := scoped.conn().QueryContext(ctx, `SELECT invitation_id FROM durable_invitations WHERE invitation_id IS NOT NULL`)
+		if err != nil {
+			return err
+		}
+		var invitationIDs []string
+		for rows.Next() {
+			var invitationID string
+			if err := rows.Scan(&invitationID); err != nil {
+				_ = rows.Close()
+				return err
+			}
+			invitationIDs = append(invitationIDs, invitationID)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		for _, invitationID := range invitationIDs {
+			if _, err := admin.GetResourceVersion(ctx, "invitation", invitationID); err == nil {
+				continue
+			} else if !errors.Is(err, idpadminstore.ErrNotFound) {
+				return err
+			}
+			if err := admin.CreateResourceVersion(ctx, "invitation", invitationID, 1, now.UTC()); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (s *Store) RebuildAdminUserProjection(ctx context.Context, now time.Time) (idpadminstore.ProjectionReport, error) {

@@ -323,8 +323,8 @@ func TestProductionCommandRequiresSignupProgramAndDropsLegacyRegistrationFlag(t 
 		t.Fatal("signup-program-file is not a required production flag")
 	}
 	lookupKey, ok := section.GetDefinitions().Get("invitation-lookup-key-file")
-	if !ok || lookupKey.Required {
-		t.Fatal("invitation lookup key must be conditionally required by the selected program")
+	if !ok || !lookupKey.Required {
+		t.Fatal("invitation lookup key must be required for administration issuance")
 	}
 	for _, conditional := range []string{"email-challenge-key-file", "email-smtp-address", "email-smtp-tls-mode", "email-smtp-password-file", "email-from-address"} {
 		definition, ok := section.GetDefinitions().Get(conditional)

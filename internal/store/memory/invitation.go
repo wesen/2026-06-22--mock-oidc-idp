@@ -32,6 +32,17 @@ func (s *Store) GetDurableInvitation(_ context.Context, codeHash []byte) (idpsto
 	return cloneDurableInvitation(invitation), nil
 }
 
+func (s *Store) GetDurableInvitationByID(_ context.Context, invitationID string) (idpstore.DurableInvitation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, invitation := range s.durableInvitations {
+		if invitation.ID == strings.TrimSpace(invitationID) {
+			return cloneDurableInvitation(invitation), nil
+		}
+	}
+	return idpstore.DurableInvitation{}, idpstore.ErrNotFound
+}
+
 func (s *Store) RedeemDurableInvitation(_ context.Context, codeHash []byte, audience string, now time.Time) (idpstore.DurableInvitation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -75,6 +86,26 @@ func (s *Store) RevokeDurableInvitation(_ context.Context, codeHash []byte, now 
 		s.durableInvitations[key] = invitation
 	}
 	return nil
+}
+
+func (s *Store) RevokeDurableInvitationByID(_ context.Context, invitationID string, now time.Time) (idpstore.DurableInvitation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, invitation := range s.durableInvitations {
+		if invitation.ID != strings.TrimSpace(invitationID) {
+			continue
+		}
+		if invitation.RedeemedAt != nil {
+			return idpstore.DurableInvitation{}, idpstore.ErrAlreadyConsumed
+		}
+		if invitation.RevokedAt == nil {
+			at := now.UTC()
+			invitation.RevokedAt = &at
+			s.durableInvitations[key] = invitation
+		}
+		return cloneDurableInvitation(invitation), nil
+	}
+	return idpstore.DurableInvitation{}, idpstore.ErrNotFound
 }
 
 func validateDurableInvitation(invitation idpstore.DurableInvitation) error {

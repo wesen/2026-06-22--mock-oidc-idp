@@ -93,6 +93,14 @@ type ProjectionReport struct {
 	Mismatches     int `json:"mismatches"`
 }
 
+type InvitationRecord struct {
+	InvitationID     string
+	Label            string
+	CreatedBySubject string
+	CreatedAt        time.Time
+	LastIssuedAt     time.Time
+}
+
 type GrantStore interface {
 	CreateAdminGrant(ctx context.Context, grant idpadmin.Grant) error
 	GetAdminGrant(ctx context.Context, id string) (idpadmin.Grant, error)
@@ -126,11 +134,16 @@ type SecurityStore interface {
 	EnqueueAudit(ctx context.Context, record AuditOutboxRecord) error
 }
 
+type InvitationStore interface {
+	CreateAdminInvitation(ctx context.Context, record InvitationRecord) error
+}
+
 type TxStore interface {
 	GrantStore
 	SessionStore
 	AuthAttemptStore
 	SecurityStore
+	InvitationStore
 }
 
 type AtomicStore interface {
@@ -140,6 +153,7 @@ type AtomicStore interface {
 type ProjectionStore interface {
 	RebuildAdminUserProjection(ctx context.Context, now time.Time) (ProjectionReport, error)
 	CheckAdminUserProjection(ctx context.Context, now time.Time) (ProjectionReport, error)
+	InitializeAdminResourceVersions(ctx context.Context, now time.Time) error
 }
 
 type ReadModelStore interface {

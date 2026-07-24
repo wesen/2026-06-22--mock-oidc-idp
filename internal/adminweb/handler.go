@@ -18,29 +18,30 @@ import (
 
 type PageDataProvider interface {
 	PageData(ctx context.Context, principal idpadmin.AdminPrincipal, pageID string, query url.Values) (map[string]any, error)
+	ClientDetail(ctx context.Context, principal idpadmin.AdminPrincipal, clientID string) (idpadmin.ClientDetail, error)
 }
 
 type ActionPreparer interface {
 	Prepare(context.Context, idpadmin.AdminPrincipal, idpadminapp.PrepareActionRequest) (idpadminapp.PreparedAction, error)
 }
 
-type UserActionExecutor interface {
+type ActionExecutor interface {
 	Execute(context.Context, idpadminapp.ExecutionRequest, []byte) ([]byte, error)
 }
 
 type HandlerConfig struct {
-	Auth    *AuthManager
-	Pages   PageDataProvider
-	Widgets *WidgetRuntime
-	Actions ActionPreparer
-	Users   UserActionExecutor
-	SPA     http.Handler
-	Assets  http.Handler
+	Auth     *AuthManager
+	Pages    PageDataProvider
+	Widgets  *WidgetRuntime
+	Actions  ActionPreparer
+	Commands ActionExecutor
+	SPA      http.Handler
+	Assets   http.Handler
 }
 
 func NewHandler(config HandlerConfig) (http.Handler, error) {
 	if config.Auth == nil || config.Pages == nil || config.Widgets == nil ||
-		config.Actions == nil || config.Users == nil ||
+		config.Actions == nil || config.Commands == nil ||
 		config.SPA == nil || config.Assets == nil {
 		return nil, errors.New("admin auth, pages, widgets, actions, users, SPA, and assets are required")
 	}
@@ -52,13 +53,30 @@ func NewHandler(config HandlerConfig) (http.Handler, error) {
 	mux.Handle("POST /api/admin/logout", config.Auth.RequireCSRF(http.HandlerFunc(config.Auth.LogoutHandler)))
 	mux.Handle("GET /api/admin/overview", config.Auth.Authenticate(pageDataJSONHandler(config.Pages, "overview")))
 	mux.Handle("GET /api/admin/pages/{page}", config.Auth.Authenticate(pageDataPathHandler(config.Pages)))
+	mux.Handle("GET /api/admin/clients/{client}", config.Auth.Authenticate(clientDetailHandler(config.Pages)))
 	mux.Handle("GET /api/widget/pages/{page}", config.Auth.Authenticate(widgetPageHandler(config.Pages, config.Widgets)))
 	mux.Handle("POST /api/widget/actions/prepare", config.Auth.RequireCSRF(prepareActionHandler(config.Actions)))
-	mux.Handle("POST /api/widget/actions/execute", config.Auth.RequireCSRF(executeActionHandler(config.Users)))
+	mux.Handle("POST /api/widget/actions/execute", config.Auth.RequireCSRF(executeActionHandler(config.Commands)))
 	mux.Handle("/static/admin/", http.StripPrefix("/static/admin/", config.Assets))
 	mux.Handle("/admin", config.SPA)
 	mux.Handle("/admin/", config.SPA)
 	return securityHeaders(mux), nil
+}
+
+func clientDetailHandler(pages PageDataProvider) http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		principal, ok := Principal(request.Context())
+		if !ok {
+			writeJSONError(writer, http.StatusUnauthorized, "authentication_required")
+			return
+		}
+		detail, err := pages.ClientDetail(request.Context(), principal, request.PathValue("client"))
+		if err != nil {
+			writeAdminError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, detail)
+	})
 }
 
 func pageDataPathHandler(pages PageDataProvider) http.Handler {
@@ -100,7 +118,7 @@ func prepareActionHandler(actions ActionPreparer) http.Handler {
 	})
 }
 
-func executeActionHandler(users UserActionExecutor) http.Handler {
+func executeActionHandler(commands ActionExecutor) http.Handler {
 	type envelope struct {
 		Payload struct {
 			ActionHandle string          `json:"actionHandle"`
@@ -121,7 +139,7 @@ func executeActionHandler(users UserActionExecutor) http.Handler {
 		rawInput := append([]byte(nil), input.Payload.Input...)
 		defer clearSensitiveBytes(rawInput)
 		hash := sha256.Sum256(append([]byte(input.Payload.ActionHandle+"\x00"), rawInput...))
-		response, err := users.Execute(request.Context(), idpadminapp.ExecutionRequest{
+		response, err := commands.Execute(request.Context(), idpadminapp.ExecutionRequest{
 			Handle: input.Payload.ActionHandle, Principal: principal,
 			RequestID:      request.Header.Get("X-Request-ID"),
 			IdempotencyKey: request.Header.Get("Idempotency-Key"),
@@ -153,6 +171,7 @@ func decodeBoundedJSON(writer http.ResponseWriter, request *http.Request, target
 }
 
 func writeActionError(writer http.ResponseWriter, err error) {
+	var validation *idpadminapp.ValidationError
 	switch {
 	case errors.Is(err, idpadmin.ErrFreshAuthRequired):
 		writeJSONError(writer, http.StatusUnauthorized, "fresh_auth_required")
@@ -172,6 +191,10 @@ func writeActionError(writer http.ResponseWriter, err error) {
 	case errors.Is(err, idpadminapp.ErrReasonRequired),
 		errors.Is(err, idpadminapp.ErrConfirmationFailed):
 		writeJSONError(writer, http.StatusUnprocessableEntity, "validation_failed")
+	case errors.As(err, &validation):
+		writeJSON(writer, http.StatusUnprocessableEntity, map[string]any{
+			"error": "validation_failed", "field_errors": validation.FieldErrors,
+		})
 	default:
 		writeJSONError(writer, http.StatusBadRequest, "invalid_request")
 	}
@@ -232,6 +255,9 @@ func writeAdminError(writer http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, idpadminapp.ErrUnknownAdminPage):
 		writeJSONError(writer, http.StatusNotFound, "page_not_found")
+	case errors.Is(err, idpadminstore.ErrNotFound),
+		errors.Is(err, idpstore.ErrNotFound):
+		writeJSONError(writer, http.StatusNotFound, "resource_not_found")
 	case errors.Is(err, idpadmin.ErrCapabilityDenied),
 		errors.Is(err, idpadmin.ErrGrantInactive),
 		errors.Is(err, idpadmin.ErrGrantChanged):

@@ -29,6 +29,14 @@ func (staticPageProvider) PageData(
 	return map[string]any{"id": "overview", "title": "Overview"}, nil
 }
 
+func (staticPageProvider) ClientDetail(
+	context.Context,
+	idpadmin.AdminPrincipal,
+	string,
+) (idpadmin.ClientDetail, error) {
+	return idpadmin.ClientDetail{}, nil
+}
+
 type staticActionPreparer struct{}
 
 func (staticActionPreparer) Prepare(
@@ -63,7 +71,7 @@ func TestHandlerMountsPublicSurfaceWithSecurityHeaders(t *testing.T) {
 	require.NoError(t, err)
 	handler, err := adminweb.NewHandler(adminweb.HandlerConfig{
 		Auth: auth, Pages: staticPageProvider{}, Widgets: widgets,
-		Actions: staticActionPreparer{}, Users: staticUserExecutor{},
+		Actions: staticActionPreparer{}, Commands: staticUserExecutor{},
 		SPA: http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 			_, _ = writer.Write([]byte("spa"))
 		}),
@@ -110,6 +118,7 @@ func (r *recordingActionPreparer) Prepare(
 type recordingUserExecutor struct {
 	request idpadminapp.ExecutionRequest
 	input   string
+	err     error
 }
 
 func (r *recordingUserExecutor) Execute(
@@ -119,6 +128,9 @@ func (r *recordingUserExecutor) Execute(
 ) ([]byte, error) {
 	r.request = request
 	r.input = string(input)
+	if r.err != nil {
+		return nil, r.err
+	}
 	return []byte(`{"committed":true,"audit_status":"pending"}`), nil
 }
 
@@ -157,7 +169,7 @@ func TestHandlerGuardsPrepareAndExecuteWithSessionOriginAndCSRF(t *testing.T) {
 	users := &recordingUserExecutor{}
 	handler, err := adminweb.NewHandler(adminweb.HandlerConfig{
 		Auth: auth, Pages: staticPageProvider{}, Widgets: widgets,
-		Actions: actions, Users: users,
+		Actions: actions, Commands: users,
 		SPA: http.NotFoundHandler(), Assets: http.NotFoundHandler(),
 	})
 	require.NoError(t, err)
@@ -206,4 +218,25 @@ func TestHandlerGuardsPrepareAndExecuteWithSessionOriginAndCSRF(t *testing.T) {
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	require.Equal(t, http.StatusForbidden, response.Code)
+
+	users.err = &idpadminapp.ValidationError{
+		FieldErrors: map[string]string{"redirect_uris": "redirect URI must not contain wildcards"},
+		Cause:       idpstore.ErrWildcardRedirectURI,
+	}
+	request = httptest.NewRequest(
+		http.MethodPost,
+		"https://issuer.example/api/widget/actions/execute",
+		strings.NewReader(`{"payload":{"actionHandle":"signed-handle","input":{"redirect_uris":["https://*.example.test"]}}}`),
+	)
+	request.AddCookie(&http.Cookie{Name: "tinyidp_admin_session", Value: sessionRaw})
+	request.Header.Set("Origin", "https://issuer.example")
+	request.Header.Set("X-CSRF-Token", csrfRaw)
+	request.Header.Set("Idempotency-Key", "idem-validation")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	require.Equal(t, http.StatusUnprocessableEntity, response.Code)
+	require.JSONEq(t, `{
+		"error":"validation_failed",
+		"field_errors":{"redirect_uris":"redirect URI must not contain wildcards"}
+	}`, response.Body.String())
 }

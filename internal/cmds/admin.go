@@ -18,6 +18,7 @@ import (
 	"github.com/go-go-golems/tiny-idp/pkg/idpaccounts"
 	"github.com/go-go-golems/tiny-idp/pkg/idpadmin"
 	"github.com/go-go-golems/tiny-idp/pkg/idpadminapp"
+	"github.com/go-go-golems/tiny-idp/pkg/idpinvite"
 	"github.com/go-go-golems/tiny-idp/pkg/sqlitestore"
 )
 
@@ -210,13 +211,22 @@ func newAdminUserDisableCommand(dbPath, actionKeyFile *string, disabled bool) *c
 }
 
 type adminUserRuntime struct {
-	store     *sqlitestore.Store
-	actions   *idpadminapp.ActionService
-	users     *idpadminapp.UserCommandService
-	principal idpadmin.AdminPrincipal
+	store       *sqlitestore.Store
+	actions     *idpadminapp.ActionService
+	users       *idpadminapp.UserCommandService
+	invitations *idpadminapp.InvitationCommandService
+	clients     *idpadminapp.ClientCommandService
+	principal   idpadmin.AdminPrincipal
 }
 
 func openAdminUserRuntime(ctx context.Context, dbPath, actionKeyFile string) (*adminUserRuntime, error) {
+	return openAdminCommandRuntime(ctx, dbPath, actionKeyFile, "")
+}
+
+func openAdminCommandRuntime(
+	ctx context.Context,
+	dbPath, actionKeyFile, invitationKeyFile string,
+) (*adminUserRuntime, error) {
 	if strings.TrimSpace(dbPath) == "" {
 		return nil, fmt.Errorf("--db is required")
 	}
@@ -231,6 +241,10 @@ func openAdminUserRuntime(ctx context.Context, dbPath, actionKeyFile string) (*a
 	}
 	now := time.Now().UTC()
 	if _, err := store.RebuildAdminUserProjection(ctx, now); err != nil {
+		_ = store.Close()
+		return nil, err
+	}
+	if err := store.InitializeAdminResourceVersions(ctx, now); err != nil {
 		_ = store.Close()
 		return nil, err
 	}
@@ -270,8 +284,32 @@ func openAdminUserRuntime(ctx context.Context, dbPath, actionKeyFile string) (*a
 		_ = store.Close()
 		return nil, err
 	}
+	clients, err := idpadminapp.NewClientCommandService(store, executor, clock)
+	if err != nil {
+		_ = store.Close()
+		return nil, err
+	}
+	var invitations *idpadminapp.InvitationCommandService
+	if strings.TrimSpace(invitationKeyFile) != "" {
+		invitationKey, err := readOwnerOnlySecret(invitationKeyFile)
+		if err != nil {
+			_ = store.Close()
+			return nil, err
+		}
+		durable, durableErr := idpinvite.NewDurableService(store, invitationKey)
+		clearProductionSecret(invitationKey)
+		if durableErr != nil {
+			_ = store.Close()
+			return nil, durableErr
+		}
+		invitations, err = idpadminapp.NewInvitationCommandService(store, executor, durable, clock)
+		if err != nil {
+			_ = store.Close()
+			return nil, err
+		}
+	}
 	return &adminUserRuntime{
-		store: store, actions: actions, users: users,
+		store: store, actions: actions, users: users, invitations: invitations, clients: clients,
 		principal: idpadmin.AdminPrincipal{
 			Subject: grant.ActorSubject, SessionID: sessionBinding,
 			Authenticated: now, Assurance: idpadmin.AssuranceFresh,
@@ -312,6 +350,36 @@ func (r *adminUserRuntime) execute(
 	var result idpadmin.UserResult
 	err = json.Unmarshal(response, &result)
 	return result, err
+}
+
+func (r *adminUserRuntime) executeCommand(
+	ctx context.Context,
+	service idpadminapp.CommandExecutor,
+	command, targetID string,
+	input map[string]any,
+) ([]byte, error) {
+	if service == nil {
+		return nil, fmt.Errorf("administration command service is unavailable")
+	}
+	prepared, err := r.actions.Prepare(ctx, r.principal, idpadminapp.PrepareActionRequest{
+		Command: command, TargetID: targetID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(input)
+	if err != nil {
+		return nil, err
+	}
+	hash := sha256.Sum256(raw)
+	requestID, err := adminCLIRandomID()
+	if err != nil {
+		return nil, err
+	}
+	return service.Execute(ctx, idpadminapp.ExecutionRequest{
+		Handle: prepared.Handle, Principal: r.principal, RequestID: requestID,
+		IdempotencyKey: requestID, RequestHash: hash[:],
+	}, raw)
 }
 
 func adminCLIRandomID() (string, error) {

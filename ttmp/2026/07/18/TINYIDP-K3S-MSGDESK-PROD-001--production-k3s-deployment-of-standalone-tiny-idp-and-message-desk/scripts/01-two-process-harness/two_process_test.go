@@ -500,6 +500,9 @@ func (h *harness) startTinyIDP() {
 	h.t.Helper()
 	program := filepath.Join(h.root, "tinyidp", "signup.js")
 	secret := filepath.Join(h.root, "tinyidp", "secrets", "token.key")
+	adminAuthKey := filepath.Join(h.root, "tinyidp", "secrets", "admin-auth.key")
+	adminActionKey := filepath.Join(h.root, "tinyidp", "secrets", "admin-action.key")
+	invitationKey := filepath.Join(h.root, "tinyidp", "secrets", "invitation.key")
 	clients := filepath.Join(h.repo, "examples", "production-host", "catalog", "clients.json")
 	themeDir := filepath.Join(h.repo, "examples", "production-host", "themes")
 	if err := os.MkdirAll(filepath.Dir(program), 0o700); err != nil {
@@ -514,6 +517,13 @@ func (h *harness) startTinyIDP() {
 	if err := os.WriteFile(secret, bytes.Repeat([]byte{0x42}, 32), 0o600); err != nil {
 		h.t.Fatalf("write Tiny-IDP test secret: %v", err)
 	}
+	for path, value := range map[string]byte{
+		adminAuthKey: 0x43, adminActionKey: 0x44, invitationKey: 0x45,
+	} {
+		if err := os.WriteFile(path, bytes.Repeat([]byte{value}, 32), 0o600); err != nil {
+			h.t.Fatalf("write Tiny-IDP administration test secret: %v", err)
+		}
+	}
 	h.start("tinyidp", h.idpLog, filepath.Join(h.binRoot, "tinyidp"), "serve-production",
 		"--addr", h.idpAddress,
 		"--admin-addr", h.adminAddress,
@@ -526,6 +536,9 @@ func (h *harness) startTinyIDP() {
 		"--db", h.idpDatabase,
 		"--audit-path", h.idpAudit,
 		"--token-secret-file", secret,
+		"--admin-auth-key-file", adminAuthKey,
+		"--admin-action-key-file", adminActionKey,
+		"--invitation-lookup-key-file", invitationKey,
 		"--trusted-proxy-cidrs", "127.0.0.1/32")
 }
 

@@ -165,14 +165,11 @@ func runProductionHost(ctx context.Context, settings *productionsection.Settings
 		return fmt.Errorf("check signup program: %w", err)
 	}
 	signupProgram := signupArtifact.Program()
-	var invitationLookupKey []byte
-	if productionProgramRequiresDurableInvitations(signupProgram) {
-		invitationLookupKey, err = readOwnerOnlySecret(settings.InvitationKeyFile)
-		if err != nil {
-			return fmt.Errorf("read invitation lookup key: %w", err)
-		}
-		defer clearProductionSecret(invitationLookupKey)
+	invitationLookupKey, err := readOwnerOnlySecret(settings.InvitationKeyFile)
+	if err != nil {
+		return fmt.Errorf("read invitation lookup key: %w", err)
 	}
+	defer clearProductionSecret(invitationLookupKey)
 	clientCatalog, err := productionconfig.LoadClientCatalog(settings.ClientsFile)
 	if err != nil {
 		return err
@@ -197,15 +194,12 @@ func runProductionHost(ctx context.Context, settings *productionsection.Settings
 	if err != nil {
 		return err
 	}
-	var durableInvitations *idpinvite.DurableService
-	if len(invitationLookupKey) != 0 {
-		durableInvitations, err = idpinvite.NewDurableService(store, invitationLookupKey)
-		if err != nil {
-			_ = store.Close()
-			return fmt.Errorf("construct durable invitation service: %w", err)
-		}
-		clearProductionSecret(invitationLookupKey)
+	durableInvitations, err := idpinvite.NewDurableService(store, invitationLookupKey)
+	if err != nil {
+		_ = store.Close()
+		return fmt.Errorf("construct durable invitation service: %w", err)
 	}
+	clearProductionSecret(invitationLookupKey)
 	emailChallenges, err := newProductionEmailChallenges(settings, store, signupProgram)
 	if err != nil {
 		_ = store.Close()
@@ -339,6 +333,13 @@ func runProductionHost(ctx context.Context, settings *productionsection.Settings
 		_ = store.Close()
 		return fmt.Errorf("rebuild admin user projection: %w", err)
 	}
+	if err := store.InitializeAdminResourceVersions(ctx, time.Now().UTC()); err != nil {
+		_ = provider.Close(context.Background())
+		_ = signupManager.Close(context.Background())
+		_ = audit.Close()
+		_ = store.Close()
+		return fmt.Errorf("initialize admin resource versions: %w", err)
+	}
 	adminAuthorizer, err := idpadmin.NewAuthorizer(store, 5*time.Minute, time.Now)
 	if err != nil {
 		_ = provider.Close(context.Background())
@@ -380,6 +381,30 @@ func runProductionHost(ctx context.Context, settings *productionsection.Settings
 		_ = store.Close()
 		return err
 	}
+	adminInvitations, err := idpadminapp.NewInvitationCommandService(store, adminExecutor, durableInvitations, time.Now)
+	if err != nil {
+		_ = provider.Close(context.Background())
+		_ = signupManager.Close(context.Background())
+		_ = audit.Close()
+		_ = store.Close()
+		return err
+	}
+	adminClients, err := idpadminapp.NewClientCommandService(store, adminExecutor, time.Now)
+	if err != nil {
+		_ = provider.Close(context.Background())
+		_ = signupManager.Close(context.Background())
+		_ = audit.Close()
+		_ = store.Close()
+		return err
+	}
+	adminCommands, err := idpadminapp.NewCommandDispatcher(adminExecutor, adminUsers, adminInvitations, adminClients)
+	if err != nil {
+		_ = provider.Close(context.Background())
+		_ = signupManager.Close(context.Background())
+		_ = audit.Close()
+		_ = store.Close()
+		return err
+	}
 	adminPages, err := idpadminapp.NewPageDataService(store, adminAuthorizer, time.Now)
 	if err != nil {
 		_ = provider.Close(context.Background())
@@ -398,7 +423,7 @@ func runProductionHost(ctx context.Context, settings *productionsection.Settings
 	}
 	publicAdminHandler, err := adminweb.NewHandler(adminweb.HandlerConfig{
 		Auth: adminAuth, Pages: adminPages, Widgets: adminWidgets,
-		Actions: adminActions, Users: adminUsers,
+		Actions: adminActions, Commands: adminCommands,
 		SPA: adminweb.SPAHandler(), Assets: adminweb.AssetsHandler(),
 	})
 	if err != nil {
