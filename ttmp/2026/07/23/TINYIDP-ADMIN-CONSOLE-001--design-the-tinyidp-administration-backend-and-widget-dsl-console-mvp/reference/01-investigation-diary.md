@@ -2348,3 +2348,103 @@ safe Go page DTO
     -> JSON normalization and deterministic validator
     -> defaultWidgetRegistry in React
 ```
+
+## Step 15: Deliver the implemented ticket
+
+The completed intern guide was opened through `md-view` after the
+implementation and evidence commits, making the rendered document available
+for immediate local review. The updated ticket bundle was then rendered and
+uploaded to reMarkable as one PDF containing the index, implementation guide,
+investigation diary, task state, and changelog.
+
+This delivery happened only after a clean worktree check and a final
+`docmgr doctor` pass. The uploaded bundle therefore corresponds to commits
+`972a0a3` and `fe5fe5a`, including the Phase F implementation and its
+requirement-by-requirement acceptance audit.
+
+### Prompt Context
+
+**User prompt (verbatim):** (same as Step 4)
+
+**Assistant interpretation:** Make the finished implementation and its evidence
+easy to inspect locally and on reMarkable, then preserve the delivery result in
+the ticket diary.
+
+**Inferred user intent:** End with durable, reviewable code and documentation,
+not an implementation that exists only in an agent session.
+
+### What I did
+
+- Ran `docmgr doctor --ticket TINYIDP-ADMIN-CONSOLE-001 --stale-after 30`.
+- Confirmed all doctor checks passed and the worktree was clean.
+- Opened the implementation guide with:
+
+  ```text
+  md-view view ttmp/.../design-doc/01-tinyidp-administration-backend-mvp-architecture-and-implementation-guide.md
+  ```
+
+- Uploaded the index, design, diary, tasks, and changelog as a ToC-enabled PDF.
+
+### Why
+
+- Rendering catches structural Markdown problems that source inspection can
+  miss and gives the requested local review surface.
+- Bundling the guide with its diary and acceptance state preserves both the
+  architecture and the evidence behind it.
+
+### What worked
+
+- `md-view` returned:
+
+  ```text
+  http://localhost:37221/render?file=/home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/ttmp/2026/07/23/TINYIDP-ADMIN-CONSOLE-001--design-the-tinyidp-administration-backend-and-widget-dsl-console-mvp/design-doc/01-tinyidp-administration-backend-mvp-architecture-and-implementation-guide.md
+  ```
+
+- reMarkable upload returned:
+
+  ```text
+  OK: uploaded TINYIDP ADMIN CONSOLE MVP IMPLEMENTED.pdf -> /ai/2026/07/24/TINYIDP-ADMIN-CONSOLE-001
+  ```
+
+### What didn't work
+
+- N/A
+
+### What I learned
+
+- The reMarkable uploader can render the complete long-form ticket, including
+  the large implementation diary, in one non-interactive bundle.
+
+### What was tricky to build
+
+- Delivery ordering matters: uploading before the release evidence exists
+  would leave the remote guide looking complete without the commands and
+  acceptance mapping that prove it. The implementation, evidence commit,
+  doctor check, local render, and upload were therefore performed in that
+  order.
+
+### What warrants a second pair of eyes
+
+- Human review should focus on the design's five non-blocking owner decisions
+  and on the tablet snapshot's visual hierarchy.
+
+### What should be done in the future
+
+- N/A
+
+### Code review instructions
+
+- Review implementation commit `972a0a3`.
+- Review evidence/documentation commit `fe5fe5a`.
+- Open the local guide through the `md-view` URL above or read the uploaded PDF
+  under `/ai/2026/07/24/TINYIDP-ADMIN-CONSOLE-001`.
+
+### Technical details
+
+The uploaded document is:
+
+```text
+TINYIDP ADMIN CONSOLE MVP IMPLEMENTED.pdf
+remote directory: /ai/2026/07/24/TINYIDP-ADMIN-CONSOLE-001
+ToC depth: 2
+```

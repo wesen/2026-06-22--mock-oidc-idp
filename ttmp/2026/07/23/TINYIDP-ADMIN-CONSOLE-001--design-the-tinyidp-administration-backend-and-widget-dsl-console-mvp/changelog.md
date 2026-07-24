@@ -46,3 +46,11 @@ Completed Phase F hardening: 56-case all-screen fixture coverage, Axe and keyboa
 - /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/internal/adminweb/frontend/tests/admin-console.spec.ts — Browser acceptance matrix, accessibility, responsive, visual, and CSP evidence
 - /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/internal/adminweb/widget_runtime.go — Deterministic Widget IR schema, component, authority, secret, code, and URL validation
 - /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/pkg/sqlitestore/admin_queries_benchmark_test.go — Measured 10,000-user query acceptance evidence
+
+## 2026-07-24
+
+Opened the completed implementation guide with md-view and uploaded the implemented ticket bundle to /ai/2026/07/24/TINYIDP-ADMIN-CONSOLE-001 as TINYIDP ADMIN CONSOLE MVP IMPLEMENTED.pdf.
+
+### Related Files
+
+- /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/ttmp/2026/07/23/TINYIDP-ADMIN-CONSOLE-001--design-the-tinyidp-administration-backend-and-widget-dsl-console-mvp/reference/01-investigation-diary.md — Final local-render and reMarkable delivery evidence
