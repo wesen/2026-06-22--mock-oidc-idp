@@ -49,7 +49,7 @@ export function App() {
   }
 
   return (
-    <div className="d-flex min-vh-100">
+    <div className="d-flex min-vh-100 admin-shell">
       <nav className="border-end bg-body-tertiary p-3 admin-nav" aria-label="Administration">
         <a className="h5 text-decoration-none d-block mb-4" href="/admin">TinyIDP Console</a>
         <ul className="nav nav-pills flex-column gap-1">
@@ -68,6 +68,11 @@ export function App() {
         <div className="small text-body-secondary mt-4 text-break">{session.data.subject}</div>
       </nav>
       <main className="flex-grow-1 p-3 p-lg-4 overflow-auto" id="main-content">
+        <h1 className="h3 mb-3">{pages.find(([id]) => id === page)?.[1]}</h1>
+        <div className="alert alert-warning small-screen-warning" role="status">
+          This viewport is too narrow for safe administration. Read-only information remains
+          available; use a tablet or larger screen for mutations.
+        </div>
         {widget.isLoading && <div aria-busy="true">Loading page…</div>}
         {widget.isError && (
           <div className="alert alert-danger" role="alert">

@@ -46,7 +46,7 @@ export function KeyManagement({ session }: { session: AdminSession }) {
   }
 
   return (
-    <section className="mt-4" aria-labelledby="key-operations-title">
+    <section className="mt-4 admin-mutation-surface" aria-labelledby="key-operations-title">
       <h2 className="h4" id="key-operations-title">Signing-key operations</h2>
       <p className="text-body-secondary">
         Rotation creates a new RSA key and keeps the previous key available for token verification.

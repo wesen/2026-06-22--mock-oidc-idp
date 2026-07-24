@@ -62,7 +62,7 @@ export function UserManagement({ session }: Props) {
   }
 
   return (
-    <section className="mt-4" aria-labelledby="user-operations-title">
+    <section className="mt-4 admin-mutation-surface" aria-labelledby="user-operations-title">
       <h2 className="h4" id="user-operations-title">User operations</h2>
       {message && <div className="alert alert-info" role="status">{message}</div>}
       <details className="card mb-3">

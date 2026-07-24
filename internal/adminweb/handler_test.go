@@ -107,7 +107,18 @@ func TestHandlerMountsPublicSurfaceWithSecurityHeaders(t *testing.T) {
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "https://issuer.example"+path, nil))
 		require.Equal(t, http.StatusOK, response.Code)
 		require.Equal(t, expectedBody, response.Body.String())
-		require.Contains(t, response.Header().Get("Content-Security-Policy"), "script-src 'self'")
+		csp := response.Header().Get("Content-Security-Policy")
+		for _, directive := range []string{
+			"default-src 'none'", "script-src 'self'", "style-src 'self'",
+			"connect-src 'self'", "img-src 'self' data:", "font-src 'self'",
+			"frame-ancestors 'none'", "form-action 'self'", "base-uri 'none'",
+			"object-src 'none'",
+		} {
+			require.Contains(t, csp, directive)
+		}
+		require.NotContains(t, csp, "'unsafe-inline'")
+		require.NotContains(t, csp, "'unsafe-eval'")
+		require.NotContains(t, csp, "https:")
 		require.Equal(t, "DENY", response.Header().Get("X-Frame-Options"))
 	}
 
@@ -222,6 +233,7 @@ func TestHandlerGuardsPrepareAndExecuteWithSessionOriginAndCSRF(t *testing.T) {
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	require.Equal(t, http.StatusOK, response.Code)
+	require.Equal(t, "no-store", response.Header().Get("Cache-Control"))
 	require.Equal(t, "signed-handle", users.request.Handle)
 	require.Equal(t, "idem-1", users.request.IdempotencyKey)
 	require.JSONEq(t, `{"reason":"review","confirmation":"DISABLE"}`, users.input)
@@ -259,4 +271,28 @@ func TestHandlerGuardsPrepareAndExecuteWithSessionOriginAndCSRF(t *testing.T) {
 		"error":"validation_failed",
 		"field_errors":{"redirect_uris":"redirect URI must not contain wildcards"}
 	}`, response.Body.String())
+
+	request = httptest.NewRequest(
+		http.MethodPost,
+		"https://issuer.example/api/widget/actions/prepare",
+		strings.NewReader(`{"command":"users.disable","target_id":"user-1","unsupported":true}`),
+	)
+	request.AddCookie(&http.Cookie{Name: "tinyidp_admin_session", Value: sessionRaw})
+	request.Header.Set("Origin", "https://issuer.example")
+	request.Header.Set("X-CSRF-Token", csrfRaw)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	require.Equal(t, http.StatusBadRequest, response.Code)
+
+	request = httptest.NewRequest(
+		http.MethodPost,
+		"https://issuer.example/api/widget/actions/prepare",
+		strings.NewReader(`{"command":"`+strings.Repeat("x", 9<<10)+`"}`),
+	)
+	request.AddCookie(&http.Cookie{Name: "tinyidp_admin_session", Value: sessionRaw})
+	request.Header.Set("Origin", "https://issuer.example")
+	request.Header.Set("X-CSRF-Token", csrfRaw)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	require.Equal(t, http.StatusBadRequest, response.Code)
 }

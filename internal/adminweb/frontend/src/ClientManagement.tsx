@@ -61,7 +61,7 @@ export function ClientManagement({ session }: { session: AdminSession }) {
   }
 
   return (
-    <section className="mt-4" aria-labelledby="client-operations-title">
+    <section className="mt-4 admin-mutation-surface" aria-labelledby="client-operations-title">
       <h2 className="h4" id="client-operations-title">Application operations</h2>
       {message && <div className="alert alert-info" role="status">{message}</div>}
       {secret && (

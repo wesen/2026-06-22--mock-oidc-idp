@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/dop251/goja"
@@ -86,6 +87,22 @@ func newWidgetVM(pageData any) (*goja.Runtime, *require.Registry, error) {
 }
 
 func validateWidgetIR(root any) error {
+	page, ok := root.(map[string]any)
+	if !ok {
+		return errors.New("admin Widget IR root must be an object")
+	}
+	if page["schemaVersion"] != "0.1.0" {
+		return errors.New("admin Widget IR schema version is unsupported")
+	}
+	for _, field := range []string{"id", "title"} {
+		value, ok := page[field].(string)
+		if !ok || value == "" || len(value) > maxWidgetString {
+			return fmt.Errorf("admin Widget IR %s is invalid", field)
+		}
+	}
+	if _, ok := page["root"].(map[string]any); !ok {
+		return errors.New("admin Widget IR component root is missing")
+	}
 	nodes := 0
 	var visit func(any, int) error
 	visit = func(value any, depth int) error {
@@ -102,8 +119,26 @@ func validateWidgetIR(root any) error {
 				if len(key) > maxWidgetString {
 					return errors.New("admin Widget IR key exceeds string limit")
 				}
+				if unsafeAdminWidgetKey(key) {
+					return fmt.Errorf("admin Widget IR contains forbidden property %q", key)
+				}
 				if err := visit(child, depth+1); err != nil {
 					return err
+				}
+			}
+			_, hasType := typed["type"]
+			_, hasText := typed["text"]
+			_, hasChildren := typed["children"]
+			if kind, exists := typed["kind"]; exists && (hasType || hasText || hasChildren) {
+				kindValue, ok := kind.(string)
+				if !ok || kindValue != "component" && kindValue != "text" {
+					return errors.New("admin Widget IR contains unsupported node kind")
+				}
+				if kindValue == "component" {
+					component, ok := typed["type"].(string)
+					if !ok || !allowedAdminWidgetComponent(component) {
+						return fmt.Errorf("admin Widget IR contains unsupported component %q", component)
+					}
 				}
 			}
 		case []any:
@@ -116,6 +151,9 @@ func validateWidgetIR(root any) error {
 			if len(typed) > maxWidgetString {
 				return errors.New("admin Widget IR value exceeds string limit")
 			}
+			if unsafeAdminWidgetString(typed) {
+				return errors.New("admin Widget IR contains forbidden content")
+			}
 		case nil, bool, float64:
 		default:
 			return fmt.Errorf("admin Widget IR contains unsupported value %T", value)
@@ -123,4 +161,36 @@ func validateWidgetIR(root any) error {
 		return nil
 	}
 	return visit(root, 0)
+}
+
+func unsafeAdminWidgetKey(key string) bool {
+	normalized := strings.NewReplacer("_", "", "-", "", ".", "").Replace(
+		strings.ToLower(strings.TrimSpace(key)),
+	)
+	switch normalized {
+	case "command", "capability", "scope", "sql", "script", "html",
+		"password", "passwordhash", "secrethash", "storedhash",
+		"privatekey", "privatekeybytes", "cookie", "csrftoken":
+		return true
+	default:
+		return false
+	}
+}
+
+func unsafeAdminWidgetString(value string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	return strings.HasPrefix(normalized, "http://") ||
+		strings.HasPrefix(normalized, "https://") ||
+		strings.HasPrefix(normalized, "javascript:") ||
+		strings.Contains(normalized, "<script") ||
+		strings.Contains(normalized, "-----begin private key-----")
+}
+
+func allowedAdminWidgetComponent(component string) bool {
+	switch component {
+	case "Stack", "SectionBlock", "KeyValueStrip", "Panel", "DataTable":
+		return true
+	default:
+		return false
+	}
 }

@@ -342,6 +342,7 @@ func securityHeaders(next http.Handler) http.Handler {
 			"font-src 'self'",
 			"connect-src 'self'",
 			"base-uri 'none'",
+			"object-src 'none'",
 			"frame-ancestors 'none'",
 			"form-action 'self'",
 		}, "; "))

@@ -6,7 +6,14 @@
   const data = admin.pageData();
   const title = String(data.title || "TinyIDP Console");
   const metrics = Array.isArray(data.metrics) ? data.metrics : [];
-  const rows = Array.isArray(data.rows) ? data.rows : [];
+  const rows = Array.isArray(data.rows)
+    ? data.rows.map((row) => ({
+        id: String(row.id || ""),
+        primary: String(row.primary || ""),
+        secondary: String(row.secondary || ""),
+        status: String(row.status || ""),
+      }))
+    : [];
 
   const page = widget.page({ id: String(data.id || "overview"), title }, (builder) => {
     builder.section("Overview", (section) => {

@@ -65,7 +65,7 @@ export function InvitationManagement({ session }: { session: AdminSession }) {
   }
 
   return (
-    <section className="mt-4" aria-labelledby="invitation-operations-title">
+    <section className="mt-4 admin-mutation-surface" aria-labelledby="invitation-operations-title">
       <h2 className="h4" id="invitation-operations-title">Invitation operations</h2>
       {message && <div className="alert alert-info" role="status">{message}</div>}
       {issued && (
