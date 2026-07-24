@@ -17,6 +17,7 @@ dist/
 .devctl/
 .devctl.override.yaml
 /var/devctl/
+/tinyidp.db*
 __pycache__/
 *.py[cod]
 

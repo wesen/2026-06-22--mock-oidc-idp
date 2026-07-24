@@ -8,7 +8,7 @@ module.exports = A.program("phase0-example", program => {
   });
 
   const normalize = program.lambda("signup.normalize", {
-    input: "signupInput",
+    input: "signupStartInput",
     output: "signupResult",
     outcomes: ["complete"],
     effects: [],
@@ -20,7 +20,7 @@ module.exports = A.program("phase0-example", program => {
   });
 
   const lookup = program.lambda("signup.lookup", {
-    input: "signupInput",
+    input: "signupStartInput",
     output: "signupResult",
     outcomes: ["complete", "deny"],
     effects: ["read"],
