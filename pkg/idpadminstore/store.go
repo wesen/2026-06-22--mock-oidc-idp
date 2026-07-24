@@ -77,14 +77,38 @@ type IdempotencyRecord struct {
 }
 
 type AuditOutboxRecord struct {
-	ID          string
-	ActionID    string
-	EventType   string
-	Payload     []byte
-	CreatedAt   time.Time
-	DeliveredAt *time.Time
-	Attempts    int
-	LastError   string
+	ID            string
+	ActionID      string
+	EventType     string
+	Payload       []byte
+	CreatedAt     time.Time
+	DeliveredAt   *time.Time
+	Attempts      int
+	LastError     string
+	NextAttemptAt time.Time
+}
+
+type Operation struct {
+	ID                 string
+	Kind               string
+	Command            string
+	ActorSubject       string
+	Status             string
+	Label              string
+	Progress           []byte
+	Result             []byte
+	RelativeResultPath string
+	ErrorCode          string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	StartedAt          *time.Time
+	CompletedAt        *time.Time
+}
+
+type OutboxHealth struct {
+	Pending       int64
+	OldestPending *time.Time
+	LastErrorCode string
 }
 
 type ProjectionReport struct {
@@ -134,6 +158,18 @@ type SecurityStore interface {
 	EnqueueAudit(ctx context.Context, record AuditOutboxRecord) error
 }
 
+type WorkerStore interface {
+	ListPendingAudit(ctx context.Context, now time.Time, limit int) ([]AuditOutboxRecord, error)
+	MarkAuditDelivered(ctx context.Context, id string, deliveredAt time.Time) error
+	RecordAuditFailure(ctx context.Context, id, errorCode string, nextAttemptAt time.Time) error
+	GetAuditOutboxHealth(ctx context.Context) (OutboxHealth, error)
+	CreateAdminOperation(ctx context.Context, operation Operation) error
+	ClaimAdminOperation(ctx context.Context, id string, startedAt time.Time) (bool, error)
+	ListPendingAdminOperations(ctx context.Context, limit int) ([]Operation, error)
+	CompleteAdminOperation(ctx context.Context, id string, result []byte, relativePath string, completedAt time.Time) error
+	FailAdminOperation(ctx context.Context, id, errorCode string, completedAt time.Time) error
+}
+
 type InvitationStore interface {
 	CreateAdminInvitation(ctx context.Context, record InvitationRecord) error
 }
@@ -176,4 +212,5 @@ type Store interface {
 	AtomicStore
 	ProjectionStore
 	ReadModelStore
+	WorkerStore
 }

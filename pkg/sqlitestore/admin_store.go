@@ -409,14 +409,23 @@ func (s *Store) InsertAdminAction(ctx context.Context, action idpadminstore.Acti
 func (s *Store) EnqueueAudit(ctx context.Context, record idpadminstore.AuditOutboxRecord) error {
 	_, err := s.conn().ExecContext(ctx, `
 		INSERT INTO admin_audit_outbox
-			(id, action_id, event_type, payload_json, created_at_ns, delivered_at_ns, attempts, last_error)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			(id, action_id, event_type, payload_json, created_at_ns, delivered_at_ns,
+			 attempts, last_error, next_attempt_at_ns)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		record.ID, record.ActionID, record.EventType, record.Payload, record.CreatedAt.UnixNano(),
-		nullableTime(record.DeliveredAt), record.Attempts, record.LastError)
+		nullableTime(record.DeliveredAt), record.Attempts, record.LastError,
+		firstNonzeroTime(record.NextAttemptAt, record.CreatedAt).UnixNano())
 	if isConstraint(err) {
 		return idpadminstore.ErrDuplicate
 	}
 	return err
+}
+
+func firstNonzeroTime(value, fallback time.Time) time.Time {
+	if value.IsZero() {
+		return fallback.UTC()
+	}
+	return value.UTC()
 }
 
 func nullableTime(value *time.Time) any {

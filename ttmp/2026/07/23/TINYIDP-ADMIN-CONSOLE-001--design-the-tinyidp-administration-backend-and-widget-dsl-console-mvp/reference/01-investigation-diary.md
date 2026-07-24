@@ -1765,3 +1765,69 @@ GOCACHE=/tmp/tiny-idp-go-cache lefthook run pre-commit
 The separate build gate passed with `-buildvcs=false`; that flag suppresses
 only Go's unavailable linked-worktree VCS stamp and does not change compiled
 application behavior.
+
+## Step 11: Establish the Phase E durable worker substrate
+
+Phase E began by extending the existing administration outbox and operations
+tables rather than creating a second queueing subsystem. Migration 020 adds an
+indexed `next_attempt_at_ns` deadline to each audit record and records the
+actor, command, bounded label, result path, and start time for each operation.
+The outbox also has a unique action index: one committed administration action
+has exactly one durable audit envelope.
+
+The `idpadminstore.WorkerStore` contract now separates asynchronous lifecycle
+operations from the browser-facing read and transaction contracts. Its SQLite
+implementation provides:
+
+- bounded due-record selection ordered by retry time and creation time;
+- compare-by-state delivery and operation transitions, so a second delivery
+  acknowledgement or terminal rewrite cannot silently succeed;
+- durable retry attempts, stable safe error codes, and a next-attempt time;
+- aggregate pending count, oldest pending time, and last safe error for
+  readiness and the Operations page;
+- pending operation creation, single-winner claiming, and terminal completion
+  or failure.
+
+Focused persistence tests prove that a failed audit item disappears until its
+retry deadline, reappears with its stable error, contributes to health, and
+cannot be acknowledged twice. They also prove that an operation has one claim
+winner and cannot move from completed to failed.
+
+The new `idpadminapp.OutboxWorker` converts the bounded JSON envelope emitted
+by `Executor` into the existing `idp.Event` contract. It never adds response
+bodies or secrets. Delivery failure is recorded as
+`audit_delivery_failed`; retries use exponential backoff capped at one minute.
+Readiness is degraded while any audit is pending and becomes not ready when
+the oldest pending item reaches five minutes. Cancellation returns normally,
+allowing the production host's `errgroup` to cancel and join the worker.
+
+The first focused persistence test failed with:
+
+```text
+FOREIGN KEY constraint failed
+```
+
+That was a fixture error, not a store error: `admin_audit_outbox.action_id`
+correctly requires an `admin_actions` parent. The test now creates a real
+owner grant and action before enqueueing the audit record. The complete focused
+worker and SQLite suites then passed:
+
+```text
+ok github.com/go-go-golems/tiny-idp/pkg/idpadminapp
+ok github.com/go-go-golems/tiny-idp/pkg/sqlitestore
+```
+
+The first checkpoint commit hook found one static-analysis issue in
+`OutboxWorker.Run`: an intentionally empty branch documented that transient
+drain errors do not terminate the long-lived worker. Replacing it with an
+explicit ignored assignment preserves that policy and removes the empty
+control-flow construct. The hook's package test suite had already passed.
+
+### What is next
+
+- Add guarded signing-key rotate and retire commands; purge remains absent
+  from the browser action registry.
+- Add managed doctor, backup, verification, and one-use sanitized diagnostics
+  operations under an explicitly configured and confinement-checked root.
+- Wire both workers into the production `errgroup`, combine outbox health with
+  readiness, and expose only safe operation metadata to the React console.
