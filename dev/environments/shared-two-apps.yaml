@@ -9,6 +9,7 @@ vault:
   deployment: shared-two-apps
   runtime_path: tiny-idp/dev/shared-two-apps/runtime
   bootstrap_path: tiny-idp/dev/shared-two-apps/bootstrap
+  integration_path: tiny-idp/dev/shared-two-apps/integrations/goja
   owner_login: admin@example.test
   pki_path: tiny-idp/dev/_shared/caddy-local/pki-storage
   caddyfile: examples/tinyidp-shared-two-apps/Caddyfile
@@ -22,7 +23,8 @@ runtime:
     - name: shared-two-apps-compose
       cwd: examples/tinyidp-shared-two-apps
       command: [docker, compose, up, --build, --remove-orphans]
-prepare: {}
+prepare:
+  secrets-fetch: [python3, devctl/operations.py, --repo-root, ., --manifest, dev/environments/shared-two-apps.yaml, secrets-fetch]
 secret_material:
   target: examples/tinyidp-shared-two-apps/runtime/secrets
   files:
@@ -31,9 +33,24 @@ secret_material:
     - {source: runtime, field: admin_action_key_b64, path: admin-action.key, encoding: base64, minimum_bytes: 32}
     - {source: runtime, field: invitation_lookup_key_b64, path: invitation-lookup.key, encoding: base64, exact_bytes: 32}
     - {source: runtime, field: email_challenge_key_b64, path: email-challenge.key, encoding: base64, exact_bytes: 32}
-    - {source: bootstrap, field: owner_password, path: owner-password.txt, encoding: text, minimum_bytes: 16}
+    - {source: bootstrap, field: owner_password, path: local-admin-password.txt, encoding: text, minimum_bytes: 16}
+    - {source: bootstrap, field: invitee_password, path: local-invitee-password.txt, encoding: text, minimum_bytes: 16}
+    - {source: integration, field: postgres_password, path: goja-postgres-password.txt, encoding: text, minimum_bytes: 24}
+    - source: integration
+      field: goja_appauth_dsn
+      path: goja-appauth-dsn.txt
+      encoding: text
+      minimum_bytes: 32
+      template: "postgres://goja:{postgres_password}@postgres:5432/goja_auth?sslmode=disable"
+    - source: integration
+      field: goja_auth_config
+      path: goja-auth-config.yaml
+      encoding: text
+      minimum_bytes: 64
+      template: "auth:\n  default-store-dsn: \"postgres://goja:{postgres_password}@postgres:5432/goja_auth?sslmode=disable\"\n"
 commands:
   pki-export-root: [examples/tinyidp-shared-two-apps/scripts/01-export-browser-ca.sh]
   smoke: [examples/tinyidp-shared-two-apps/scripts/02-smoke.sh]
   browser-test: [python3, examples/tinyidp-shared-two-apps/scripts/03-browser-acceptance.py]
-  state-status: [docker, compose, -f, examples/tinyidp-shared-two-apps/compose.yaml, ps, -a]
+  state-status: [dev/scripts/compose-state.sh, shared-two-apps, examples/tinyidp-shared-two-apps/compose.yaml, status]
+  state-reset: [dev/scripts/compose-state.sh, shared-two-apps, examples/tinyidp-shared-two-apps/compose.yaml, reset]

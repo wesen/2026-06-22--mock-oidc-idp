@@ -35,4 +35,5 @@ secret_material:
 commands:
   pki-export-root: [examples/tinyidp-admin-console/scripts/02-export-browser-ca.sh]
   smoke: [examples/tinyidp-admin-console/scripts/03-smoke.sh]
-  state-status: [docker, compose, -f, examples/tinyidp-admin-console/compose.yaml, ps, -a]
+  state-status: [dev/scripts/compose-state.sh, admin-console, examples/tinyidp-admin-console/compose.yaml, status]
+  state-reset: [dev/scripts/compose-state.sh, admin-console, examples/tinyidp-admin-console/compose.yaml, reset]

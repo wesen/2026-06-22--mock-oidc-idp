@@ -153,6 +153,55 @@ class OperationTests(unittest.TestCase):
         self.assertEqual(bootstrap["owner_login"], "admin@example.test")
         self.assertNotIn(str(bootstrap["owner_password"]), json.dumps(versions))
 
+    def test_derived_goja_config_uses_the_same_vault_database_password(self) -> None:
+        manifest = load_manifest(REPO_ROOT, "dev/environments/shared-two-apps.yaml")
+
+        class EmptyVault(FakeVault):
+            def __init__(self) -> None:
+                super().__init__({})
+                self.puts: list[tuple[str, dict[str, object], int]] = []
+
+            def get(self, path: str, version: int | None = None) -> VaultRecord:
+                raise OperationError(f"missing {path}")
+
+            def put_json_cas(self, path: str, value: dict[str, object], cas: int) -> int:
+                self.puts.append((path, value, cas))
+                return len(self.puts)
+
+        vault = EmptyVault()
+        initialize_secrets(manifest, vault)
+        integration_path = manifest.vault["integration_path"]
+        integration = next(
+            value for path, value, _ in vault.puts if path == integration_path
+        )
+        password = str(integration["postgres_password"])
+        dsn = str(integration["goja_appauth_dsn"])
+        config = str(integration["goja_auth_config"])
+        self.assertIn(password, dsn)
+        self.assertIn(dsn, config)
+        self.assertTrue(config.startswith("auth:\n  default-store-dsn:"))
+        self.assertTrue(all(cas == 0 for _, _, cas in vault.puts))
+
+    def test_derived_secret_mismatch_fails_before_materialization(self) -> None:
+        manifest = load_manifest(REPO_ROOT, "dev/environments/shared-two-apps.yaml")
+        records = fake_records(manifest)
+        records[manifest.vault["bootstrap_path"]]["invitee_password"] = "invitee password value"
+        records[manifest.vault["integration_path"]] = {
+            "schema_version": 1,
+            "postgres_password": "database-password-value-12345",
+            "goja_appauth_dsn": "not-the-derived-value",
+            "goja_auth_config": "not-the-derived-value",
+        }
+        vault = FakeVault(records)
+        with tempfile.TemporaryDirectory(dir=REPO_ROOT) as directory:
+            target = Path(directory) / "runtime" / "secrets"
+            adjusted = manifest.__class__(
+                **{**manifest.__dict__, "secret_target": str(target.relative_to(REPO_ROOT))}
+            )
+            with self.assertRaisesRegex(OperationError, "derived template"):
+                materialize_secrets(REPO_ROOT, adjusted, vault)
+            self.assertFalse(target.exists())
+
     @mock.patch("operations.ssl.PEM_cert_to_DER_cert", return_value=b"root-der")
     def test_caddy_archive_requires_complete_authority(self, _mock: mock.Mock) -> None:
         root_digest, archive_digest = validate_caddy_archive(authority_archive())

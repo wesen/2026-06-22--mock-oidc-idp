@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -63,6 +64,93 @@ runtime: {kind: utility, services: []}
             )
             with self.assertRaisesRegex(ManifestError, "escapes"):
                 load_manifest(REPO_ROOT, str(path.relative_to(REPO_ROOT)))
+
+    def test_production_shaped_profiles_have_guarded_state_commands(self) -> None:
+        for path in sorted((REPO_ROOT / "dev" / "environments").glob("*.yaml")):
+            manifest = load_manifest(REPO_ROOT, str(path.relative_to(REPO_ROOT)))
+            if manifest.classification != "production-shaped-local":
+                continue
+            with self.subTest(profile=manifest.name):
+                self.assertIn("state-status", manifest.commands)
+                reset = manifest.commands.get("state-reset")
+                self.assertIsNotNone(reset)
+                self.assertIn("dev/scripts/compose-state.sh", reset)
+
+    def test_compose_secret_contracts_reference_materialized_files(self) -> None:
+        for profile in ("admin-console", "shared-two-apps", "jitsi"):
+            manifest = load_manifest(
+                REPO_ROOT,
+                f"dev/environments/{profile}.yaml",
+            )
+            compose = (
+                REPO_ROOT / "examples" / f"tinyidp-{profile}" / "compose.yaml"
+            ).read_text(encoding="utf-8")
+            with self.subTest(profile=profile):
+                for secret in manifest.secret_files:
+                    self.assertIn(
+                        f"file: ./runtime/secrets/{secret.path}",
+                        compose,
+                    )
+
+    def test_state_reset_refuses_without_typed_confirmation(self) -> None:
+        completed = subprocess.run(
+            [
+                str(REPO_ROOT / "dev/scripts/compose-state.sh"),
+                "admin-console",
+                "examples/tinyidp-admin-console/compose.yaml",
+                "reset",
+            ],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(2, completed.returncode)
+        self.assertIn(
+            "--confirm reset-admin-console-state",
+            completed.stderr,
+        )
+
+    def test_secret_template_rejects_attribute_traversal(self) -> None:
+        with tempfile.TemporaryDirectory(dir=REPO_ROOT) as directory:
+            path = Path(directory) / "bad.yaml"
+            path.write_text(
+                """
+schema_version: 1
+name: bad-template
+classification: utility
+description: invalid derived field
+origins: {}
+vault: {runtime_path: tiny-idp/dev/bad/runtime}
+runtime: {kind: utility, services: []}
+secret_material:
+  target: runtime/secrets
+  files:
+    - {source: runtime, field: seed, path: seed.txt, encoding: text}
+    - source: runtime
+      field: derived
+      path: derived.txt
+      encoding: text
+      template: "{seed.__class__}"
+""",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ManifestError, "simple peer fields"):
+                load_manifest(REPO_ROOT, str(path.relative_to(REPO_ROOT)))
+
+    def test_legacy_bootstrap_wrappers_delegate_to_shared_vault_bootstrap(self) -> None:
+        for profile in ("shared-two-apps", "jitsi"):
+            script = (
+                REPO_ROOT
+                / "examples"
+                / f"tinyidp-{profile}"
+                / "scripts"
+                / "00-init-secrets.sh"
+            ).read_text(encoding="utf-8")
+            with self.subTest(profile=profile):
+                self.assertIn("dev/scripts/bootstrap-vault-profile.sh", script)
+                self.assertNotIn("/dev/urandom", script)
+                self.assertNotIn("password-2026", script)
 
 
 if __name__ == "__main__":

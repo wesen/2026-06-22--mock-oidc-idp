@@ -13,32 +13,48 @@ The public endpoints are:
 - `https://idp.localhost:8443` — TinyIDP's canonical issuer. Start login or
   signup from an application, not by opening `/authorize` without parameters.
 - `http://127.0.0.1:8025` — private local Mailpit operator outbox. It is bound
-  to loopback rather than Caddy/public ingress and requires
-  `operator` / `local-outbox-password-2026!`.
+  to loopback rather than Caddy/public ingress.
 
 The local-only, email-verified operator fixtures are:
 
-- `admin@example.test` / `local-admin-password-2026!` — bootstrapped as the
+- `admin@example.test` — bootstrapped as the
   administrator of the goja demo organization.
-- `invitee@example.test` / `local-invitee-password-2026!` — has no initial
+- `invitee@example.test` — has no initial
   application membership and is used to prove existing-user invitation
   acceptance.
 
-These credentials are generated only under the gitignored `runtime/secrets/`
-directory and are deliberately unsuitable for any shared or production
-environment.
+The passwords and TinyIDP cryptographic keys originate in
+`kv/tiny-idp/dev/shared-two-apps/{runtime,bootstrap}` and are materialized into
+the gitignored `runtime/secrets` symlink. Read the password files locally when
+running an interactive browser test; the setup commands never print them.
+
+An existing checkout that previously used the deterministic password files
+must perform one intentional application-state reset after the Vault records
+are initialized. Existing SQLite password hashes cannot authenticate a newly
+generated Vault password:
+
+```sh
+devctl down
+devctl --profile shared-two-apps state-reset -- \
+  --confirm reset-shared-two-apps-state
+```
+
+This is a one-time migration boundary, not an ordinary startup step. It retains
+the shared Caddy authority.
 
 ## Start and verify
 
-Run from this directory:
+Authenticate the Vault CLI, then run from the repository root:
 
 ```sh
-./scripts/00-init-secrets.sh
-docker compose up --build -d
-./scripts/01-export-browser-ca.sh
-./scripts/02-smoke.sh
-./scripts/03-browser-acceptance.py
-docker compose ps -a
+devctl --profile shared-two-apps secrets-init
+devctl --profile shared-two-apps secrets-fetch
+devctl --profile shared-two-apps up
+devctl --profile shared-two-apps pki-export-root
+devctl --profile shared-two-apps smoke
+devctl --profile shared-two-apps browser-test
+devctl --profile shared-two-apps state-status
+devctl down
 ```
 
 `ca-export` is expected to show `Exited (0)`. It is a successful one-shot job,
@@ -126,12 +142,12 @@ Compose gates TinyIDP on `service_completed_successfully`; Message Desk and
 goja then wait for TinyIDP readiness. This guarantees that TLS clients never
 race the creation or publication of the local root.
 
-The IDP backend reserves `172.31.0.2` for Caddy because container-side TLS
-clients resolve the public `idp.localhost` name to that proxy address. Dynamic
-containers are allocated from `172.31.0.128/25`; this prevents a fresh,
-concurrently started stack from assigning the proxy address to Mailpit or an
-application before Caddy attaches to the network. The entire `172.31.0.0/24`
-remains the explicitly trusted proxy network at TinyIDP's HTTP listener.
+The proxy owns the `idp.localhost`, `message.localhost`, and `goja.localhost`
+aliases on the relevant Compose networks. Container-side TLS clients therefore
+resolve the public names through service DNS without reserving machine-global
+Docker subnets. The broad private CIDR accepted by the local trusted-proxy
+listeners is appropriate only because these networks are Docker-local; a
+production deployment must name the proxy's actual network.
 
 ## Persistent protected local CA
 
@@ -179,9 +195,10 @@ docker compose down
 docker compose up -d
 ```
 
-`docker compose down -v` destroys the project-owned application volumes, but
-does **not** destroy `tinyidp-local-caddy-pki`. The next start therefore uses
-the same CA and the browser trust remains valid.
+Use `devctl --profile shared-two-apps state-reset -- --confirm
+reset-shared-two-apps-state` to destroy project-owned application volumes. The
+typed confirmation is mandatory, and the command verifies that
+`tinyidp-local-caddy-pki` remains present.
 
 CA deletion is a separate, explicit destructive operation:
 
@@ -196,9 +213,11 @@ intermediate private keys and cannot be undone without a backup. The next
 CA whose public root must be exported and trusted again. Remove the old CA from
 Firefox when rotating it.
 
-The committed Postgres password is intentionally local and development-only.
-The TinyIDP token secret is generated inside its owner-only state volume. No
-production secret, Vault token, or live database is read by this project.
+The goja PostgreSQL password and generated Glazed configuration also come from
+the deployment's Vault integration record. PostgreSQL consumes the password
+through `POSTGRES_PASSWORD_FILE`; the distroless goja host consumes its DSN
+through `--config-file`. No database credential is rendered into Compose,
+passed in argv, or copied into a tracked file.
 
 ## Local go-go-goja iteration
 

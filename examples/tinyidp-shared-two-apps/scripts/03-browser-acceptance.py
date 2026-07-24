@@ -11,7 +11,6 @@ as the same HTTP requests made by the checked-in frontend.
 from __future__ import annotations
 
 import http.cookiejar
-import base64
 import json
 import re
 import secrets
@@ -35,12 +34,14 @@ MESSAGE_ORIGIN = "https://message.localhost:8443"
 GOJA_ORIGIN = "https://goja.localhost:8443"
 IDP_ORIGIN = "https://idp.localhost:8443"
 OUTBOX_ORIGIN = "http://127.0.0.1:8025"
-OUTBOX_USERNAME = "operator"
-OUTBOX_PASSWORD = "local-outbox-password-2026!"
 ADMIN_LOGIN = "admin@example.test"
-ADMIN_PASSWORD = "local-admin-password-2026!"
+ADMIN_PASSWORD = (EXAMPLE_DIR / "runtime" / "secrets" / "local-admin-password.txt").read_text(
+    encoding="utf-8"
+).strip()
 INVITEE_LOGIN = "invitee@example.test"
-INVITEE_PASSWORD = "local-invitee-password-2026!"
+INVITEE_PASSWORD = (EXAMPLE_DIR / "runtime" / "secrets" / "local-invitee-password.txt").read_text(
+    encoding="utf-8"
+).strip()
 
 
 class AcceptanceFailure(RuntimeError):
@@ -233,11 +234,7 @@ def compose(*args: str) -> str:
 
 
 def outbox_request(path: str) -> HTTPResult:
-    credentials = base64.b64encode(f"{OUTBOX_USERNAME}:{OUTBOX_PASSWORD}".encode("utf-8")).decode("ascii")
-    request = urllib.request.Request(
-        urllib.parse.urljoin(OUTBOX_ORIGIN, path),
-        headers={"Authorization": f"Basic {credentials}"},
-    )
+    request = urllib.request.Request(urllib.parse.urljoin(OUTBOX_ORIGIN, path))
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
         response = opener.open(request, timeout=5)

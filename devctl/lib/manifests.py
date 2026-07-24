@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from string import Formatter
 from typing import Any
 
 import yaml
@@ -70,6 +71,7 @@ class SecretFile:
     encoding: str
     exact_bytes: int | None
     minimum_bytes: int | None
+    template: str | None
 
 
 @dataclass(frozen=True)
@@ -181,11 +183,39 @@ def load_manifest(repo_root: Path, manifest_path: str) -> EnvironmentManifest:
             raise ManifestError(f"secret_material.files[{index}].minimum_bytes must be positive")
         if exact is not None and minimum is not None:
             raise ManifestError(f"secret_material.files[{index}] cannot set exact_bytes and minimum_bytes")
-        secret_files.append(SecretFile(source, field, file_path, encoding, exact, minimum))
+        template_value = file_doc.get("template")
+        template = (
+            None
+            if template_value is None
+            else _string(template_value, f"secret_material.files[{index}].template")
+        )
+        if template is not None and encoding != "text":
+            raise ManifestError(f"secret_material.files[{index}].template requires text encoding")
+        secret_files.append(SecretFile(source, field, file_path, encoding, exact, minimum, template))
     if secret_files and secret_target is None:
         raise ManifestError("secret_material.target is required when files are declared")
     if len({item.path for item in secret_files}) != len(secret_files):
         raise ManifestError("secret material output paths must be unique")
+    fields_by_source: dict[str, set[str]] = {}
+    for item in secret_files:
+        fields_by_source.setdefault(item.source, set()).add(item.field)
+    for index, item in enumerate(secret_files):
+        if item.template is None:
+            continue
+        for _, field_name, format_spec, conversion in Formatter().parse(item.template):
+            if field_name is None:
+                continue
+            if (
+                not field_name.isidentifier()
+                or field_name == item.field
+                or field_name not in fields_by_source[item.source]
+                or format_spec
+                or conversion
+            ):
+                raise ManifestError(
+                    f"secret_material.files[{index}].template may reference only "
+                    "simple peer fields without formatting"
+                )
 
     if classification == "production-shaped-local":
         if not issuer or not issuer.startswith("https://"):

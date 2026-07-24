@@ -148,6 +148,26 @@ def _source_path(manifest: EnvironmentManifest, source: str) -> str:
     return path
 
 
+def _render_secret_template(spec: SecretFile, record: dict[str, Any]) -> str:
+    if spec.template is None:
+        value = record.get(spec.field)
+        if not isinstance(value, str):
+            raise OperationError(f"Vault field {spec.field} must be a string")
+        return value
+    try:
+        rendered = spec.template.format_map(record)
+    except KeyError as exc:
+        raise OperationError(
+            f"Vault field {spec.field} template references missing field {exc.args[0]}"
+        ) from exc
+    value = record.get(spec.field)
+    if value is not None and value != rendered:
+        raise OperationError(
+            f"Vault field {spec.field} does not match its declared derived template"
+        )
+    return rendered
+
+
 def materialize_secrets(repo_root: Path, manifest: EnvironmentManifest, vault: VaultCLI) -> Path:
     if not manifest.secret_target or not manifest.secret_files:
         raise OperationError(f"profile {manifest.name} does not declare secret material")
@@ -161,9 +181,9 @@ def materialize_secrets(repo_root: Path, manifest: EnvironmentManifest, vault: V
         record = records[path]
         if record.data.get("schema_version") != 1:
             raise OperationError(f"Vault record {path} has unsupported schema_version")
-        if spec.field not in record.data:
+        if spec.field not in record.data and spec.template is None:
             raise OperationError(f"Vault record {path} is missing required field {spec.field}")
-        decoded[spec.path] = _decode_secret(spec, record.data[spec.field])
+        decoded[spec.path] = _decode_secret(spec, _render_secret_template(spec, record.data))
 
     target = repo_root.resolve() / manifest.secret_target
     target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -220,13 +240,13 @@ def initialize_secrets(manifest: EnvironmentManifest, vault: VaultCLI) -> dict[s
             if existing.data.get("schema_version") != 1:
                 raise OperationError(f"existing Vault record {path} has unsupported schema_version")
             for spec in specs:
-                if spec.field not in existing.data:
+                if spec.field not in existing.data and spec.template is None:
                     raise OperationError(f"existing Vault record {path} is missing {spec.field}")
-                _decode_secret(spec, existing.data[spec.field])
+                _decode_secret(spec, _render_secret_template(spec, existing.data))
             versions[path] = existing.version
             continue
         record: dict[str, Any] = {"schema_version": 1}
-        for spec in specs:
+        for spec in (item for item in specs if item.template is None):
             if spec.encoding == "base64":
                 length = spec.exact_bytes or max(spec.minimum_bytes or 32, 32)
                 record[spec.field] = base64.b64encode(secrets.token_bytes(length)).decode("ascii")
@@ -236,6 +256,8 @@ def initialize_secrets(manifest: EnvironmentManifest, vault: VaultCLI) -> dict[s
                 while len(value.encode("utf-8")) < minimum:
                     value += secrets.token_urlsafe(8)
                 record[spec.field] = value
+        for spec in (item for item in specs if item.template is not None):
+            record[spec.field] = _render_secret_template(spec, record)
         if path == manifest.vault.get("bootstrap_path"):
             record["owner_login"] = manifest.vault.get("owner_login", "admin@example.test")
         versions[path] = vault.put_json_cas(path, record, 0)

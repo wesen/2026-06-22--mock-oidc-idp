@@ -55,6 +55,16 @@ In a second terminal:
 
 Stop services with `devctl down`.
 
+To discard only the application state after stopping the profile:
+
+```bash
+devctl --profile admin-console state-reset -- \
+  --confirm reset-admin-console-state
+```
+
+The typed confirmation is mandatory. The operation verifies that the external
+Caddy authority volume remains present.
+
 ## Persistence boundaries
 
 - `tinyidp-local-caddy-pki` is the live Caddy authority and is shared with the
