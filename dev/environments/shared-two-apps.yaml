@@ -1,0 +1,29 @@
+schema_version: 1
+name: shared-two-apps
+classification: production-shaped-local
+description: Strict TinyIDP serves Message Desk and go-go-goja through Caddy local HTTPS.
+origins:
+  issuer: https://idp.localhost:8443
+vault:
+  tier: dev
+  deployment: shared-two-apps
+  runtime_path: tiny-idp/dev/shared-two-apps/runtime
+  bootstrap_path: tiny-idp/dev/shared-two-apps/bootstrap
+  pki_path: tiny-idp/dev/_shared/caddy-local/pki-storage
+required_tools: [docker, vault, jq, base64]
+required_paths:
+  - examples/tinyidp-shared-two-apps/compose.yaml
+  - examples/tinyidp-shared-two-apps/scripts/00-init-secrets.sh
+runtime:
+  kind: compose
+  services:
+    - name: shared-two-apps-compose
+      cwd: examples/tinyidp-shared-two-apps
+      command: [docker, compose, up, --build, --remove-orphans]
+prepare: {}
+commands:
+  seed: [examples/tinyidp-shared-two-apps/scripts/00-init-secrets.sh]
+  pki-export-root: [examples/tinyidp-shared-two-apps/scripts/01-export-browser-ca.sh]
+  smoke: [examples/tinyidp-shared-two-apps/scripts/02-smoke.sh]
+  browser-test: [python3, examples/tinyidp-shared-two-apps/scripts/03-browser-acceptance.py]
+  state-status: [docker, compose, -f, examples/tinyidp-shared-two-apps/compose.yaml, ps, -a]

@@ -1,0 +1,29 @@
+schema_version: 1
+name: jitsi
+classification: production-shaped-local
+description: Strict TinyIDP and Jitsi integration using the shared Caddy development authority.
+origins:
+  issuer: https://idp.localhost:8443
+vault:
+  tier: dev
+  deployment: jitsi
+  runtime_path: tiny-idp/dev/jitsi/runtime
+  bootstrap_path: tiny-idp/dev/jitsi/bootstrap
+  pki_path: tiny-idp/dev/_shared/caddy-local/pki-storage
+required_tools: [docker, vault, jq, base64]
+required_paths:
+  - examples/tinyidp-jitsi/compose.yaml
+  - examples/tinyidp-jitsi/scripts/00-init-secrets.sh
+runtime:
+  kind: compose
+  services:
+    - name: jitsi-compose
+      cwd: examples/tinyidp-jitsi
+      command: [docker, compose, up, --build, --remove-orphans]
+prepare: {}
+commands:
+  seed: [examples/tinyidp-jitsi/scripts/00-init-secrets.sh]
+  pki-export-root: [examples/tinyidp-jitsi/scripts/01-export-browser-ca.sh]
+  smoke: [examples/tinyidp-jitsi/scripts/02-smoke.sh]
+  browser-test: [examples/tinyidp-jitsi/scripts/03-browser-tests.sh]
+  state-status: [docker, compose, -f, examples/tinyidp-jitsi/compose.yaml, ps, -a]

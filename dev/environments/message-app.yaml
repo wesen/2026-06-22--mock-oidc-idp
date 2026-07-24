@@ -1,0 +1,24 @@
+schema_version: 1
+name: message-app
+classification: development
+description: Direct Go self-contained message application with embedded TinyIDP.
+origins:
+  issuer: http://127.0.0.1:8090/idp
+vault: {}
+required_tools: [go]
+required_paths:
+  - examples/tinyidp-message-app/main.go
+runtime:
+  kind: process
+  services:
+    - name: message-app
+      cwd: .
+      command: [go, run, ./examples/tinyidp-message-app, serve, --state-root, ./var/devctl/message-app, --addr, 127.0.0.1:8090, --listener-mode, development-http]
+      health:
+        type: http
+        url: http://127.0.0.1:8090/readyz
+        timeout_ms: 60000
+prepare:
+  initialize: [go, run, ./examples/tinyidp-message-app, init, --state-root, ./var/devctl/message-app, --public-base-url, http://127.0.0.1:8090]
+commands:
+  state-status: [go, run, ./examples/tinyidp-message-app, doctor, --state-root, ./var/devctl/message-app]

@@ -1,0 +1,27 @@
+schema_version: 1
+name: admin-console
+classification: production-shaped-local
+description: Strict TinyIDP administration console behind the shared Caddy development authority.
+origins:
+  issuer: https://idp.localhost:8443
+vault:
+  tier: dev
+  deployment: admin-console
+  runtime_path: tiny-idp/dev/admin-console/runtime
+  bootstrap_path: tiny-idp/dev/admin-console/bootstrap
+  pki_path: tiny-idp/dev/_shared/caddy-local/pki-storage
+required_tools: [docker, vault, jq, base64]
+required_paths:
+  - examples/tinyidp-admin-console/compose.yaml
+runtime:
+  kind: compose
+  services:
+    - name: admin-console-compose
+      cwd: examples/tinyidp-admin-console
+      command: [docker, compose, up, --build, --remove-orphans]
+prepare: {}
+commands:
+  secrets-fetch: [examples/tinyidp-admin-console/scripts/00-fetch-vault-secrets.sh]
+  pki-export-root: [examples/tinyidp-admin-console/scripts/02-export-browser-ca.sh]
+  smoke: [examples/tinyidp-admin-console/scripts/03-smoke.sh]
+  state-status: [docker, compose, -f, examples/tinyidp-admin-console/compose.yaml, ps, -a]

@@ -1,0 +1,15 @@
+schema_version: 1
+name: script-tools
+classification: utility
+description: Validate, explain, and test bounded TinyIDP signup programs.
+origins: {}
+vault: {}
+required_tools: [go]
+required_paths:
+  - examples/tinyidp-script/phase0.js
+runtime:
+  kind: utility
+  services: []
+prepare: {}
+commands:
+  smoke: [go, run, ./cmd/tinyidp, script, validate, --source, examples/tinyidp-script/phase0.js]

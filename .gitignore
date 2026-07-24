@@ -14,6 +14,9 @@
 # Local release and documentation-export artifacts.
 dist/
 .docsctl/
+.devctl/
+.devctl.override.yaml
+/var/devctl/
 
 # Hosted OIDF suite traces include captured HTTP traffic, temporary public
 # endpoints, test-owner identifiers, and development credentials. Keep them in
