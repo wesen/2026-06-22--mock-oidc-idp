@@ -9,6 +9,7 @@ import binascii
 import hashlib
 import json
 import os
+import secrets
 import shutil
 import ssl
 import subprocess
@@ -164,7 +165,7 @@ def materialize_secrets(repo_root: Path, manifest: EnvironmentManifest, vault: V
             raise OperationError(f"Vault record {path} is missing required field {spec.field}")
         decoded[spec.path] = _decode_secret(spec, record.data[spec.field])
 
-    target = (repo_root / manifest.secret_target).resolve()
+    target = repo_root.resolve() / manifest.secret_target
     target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(target.parent, 0o700)
     generations = target.parent / ".secret-generations"
@@ -200,6 +201,45 @@ def materialize_secrets(repo_root: Path, manifest: EnvironmentManifest, vault: V
     finally:
         if not promoted:
             shutil.rmtree(generation, ignore_errors=True)
+
+
+def initialize_secrets(manifest: EnvironmentManifest, vault: VaultCLI) -> dict[str, int]:
+    if not manifest.secret_files:
+        raise OperationError(f"profile {manifest.name} does not declare secret material")
+    vault.assert_authenticated()
+    grouped: dict[str, list[SecretFile]] = {}
+    for spec in manifest.secret_files:
+        grouped.setdefault(_source_path(manifest, spec.source), []).append(spec)
+    versions: dict[str, int] = {}
+    for path, specs in grouped.items():
+        try:
+            existing = vault.get(path)
+        except OperationError:
+            existing = None
+        if existing is not None:
+            if existing.data.get("schema_version") != 1:
+                raise OperationError(f"existing Vault record {path} has unsupported schema_version")
+            for spec in specs:
+                if spec.field not in existing.data:
+                    raise OperationError(f"existing Vault record {path} is missing {spec.field}")
+                _decode_secret(spec, existing.data[spec.field])
+            versions[path] = existing.version
+            continue
+        record: dict[str, Any] = {"schema_version": 1}
+        for spec in specs:
+            if spec.encoding == "base64":
+                length = spec.exact_bytes or max(spec.minimum_bytes or 32, 32)
+                record[spec.field] = base64.b64encode(secrets.token_bytes(length)).decode("ascii")
+            else:
+                minimum = spec.minimum_bytes or 16
+                value = secrets.token_urlsafe(max(24, minimum))
+                while len(value.encode("utf-8")) < minimum:
+                    value += secrets.token_urlsafe(8)
+                record[spec.field] = value
+        if path == manifest.vault.get("bootstrap_path"):
+            record["owner_login"] = manifest.vault.get("owner_login", "admin@example.test")
+        versions[path] = vault.put_json_cas(path, record, 0)
+    return versions
 
 
 def _archive_members(archive: bytes) -> dict[str, bytes]:
@@ -397,6 +437,7 @@ def build_parser() -> argparse.ArgumentParser:
     root.add_argument("--vault-mount", default=os.environ.get("TINYIDP_VAULT_MOUNT", DEFAULT_VAULT_MOUNT))
     root.add_argument("--caddy-image", default=DEFAULT_CADDY_IMAGE)
     commands = root.add_subparsers(dest="operation", required=True)
+    commands.add_parser("secrets-init")
     commands.add_parser("secrets-fetch")
     backup = commands.add_parser("pki-backup")
     backup.add_argument("--volume", default=DEFAULT_CADDY_VOLUME)
@@ -415,6 +456,11 @@ def main() -> int:
     try:
         manifest = load_manifest(repo_root, args.manifest)
         vault = VaultCLI(args.vault_mount)
+        if args.operation == "secrets-init":
+            versions = initialize_secrets(manifest, vault)
+            for path, version in sorted(versions.items()):
+                log(f"secret record ready path={path} version={version}")
+            return 0
         if args.operation == "secrets-fetch":
             target = materialize_secrets(repo_root, manifest, vault)
             log(f"materialized {len(manifest.secret_files)} files for {manifest.name} at {target}")

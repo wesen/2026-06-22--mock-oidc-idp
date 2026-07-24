@@ -9,6 +9,7 @@ vault:
   deployment: admin-console
   runtime_path: tiny-idp/dev/admin-console/runtime
   bootstrap_path: tiny-idp/dev/admin-console/bootstrap
+  owner_login: admin@example.test
   pki_path: tiny-idp/dev/_shared/caddy-local/pki-storage
   caddyfile: examples/tinyidp-admin-console/Caddyfile
 required_tools: [docker, vault, jq, base64]
@@ -20,7 +21,8 @@ runtime:
     - name: admin-console-compose
       cwd: examples/tinyidp-admin-console
       command: [docker, compose, up, --build, --remove-orphans]
-prepare: {}
+prepare:
+  secrets-fetch: [python3, devctl/operations.py, --repo-root, ., --manifest, dev/environments/admin-console.yaml, secrets-fetch]
 secret_material:
   target: examples/tinyidp-admin-console/runtime/secrets
   files:

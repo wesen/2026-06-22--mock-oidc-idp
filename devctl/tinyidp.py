@@ -22,6 +22,7 @@ PLUGIN_NAME = "tinyidp"
 MANIFEST_ENV = "TINYIDP_DEV_MANIFEST"
 DEFAULT_MANIFEST = "dev/environments/embedded.yaml"
 COMMAND_NAMES = (
+    "secrets-init",
     "secrets-fetch",
     "pki-backup",
     "pki-restore",
@@ -32,7 +33,7 @@ COMMAND_NAMES = (
     "state-status",
     "state-reset",
 )
-BUILTIN_SECURITY_COMMANDS = {"secrets-fetch", "pki-backup", "pki-restore"}
+BUILTIN_SECURITY_COMMANDS = {"secrets-init", "secrets-fetch", "pki-backup", "pki-restore"}
 
 
 def emit(value: dict[str, Any]) -> None:

@@ -19,6 +19,7 @@ from operations import (  # noqa: E402
     OperationError,
     VaultRecord,
     export_caddy_storage,
+    initialize_secrets,
     materialize_secrets,
     pki_backup,
     validate_caddy_archive,
@@ -103,6 +104,11 @@ class OperationTests(unittest.TestCase):
                 manifest.vault["runtime_path"]: 7,
             })
             self.assertEqual(vault.auth_checks, 1)
+            first_generation = promoted.resolve()
+            promoted_again = materialize_secrets(REPO_ROOT, adjusted, vault)
+            self.assertTrue(promoted_again.is_symlink())
+            self.assertNotEqual(promoted_again.resolve(), first_generation)
+            self.assertEqual((promoted_again / "admin-auth.key").read_bytes(), b"x" * 32)
 
     def test_wrong_key_length_leaves_no_target(self) -> None:
         manifest = load_manifest(REPO_ROOT, "dev/environments/admin-console.yaml")
@@ -115,6 +121,37 @@ class OperationTests(unittest.TestCase):
             with self.assertRaisesRegex(OperationError, "minimum is 32|expected 32"):
                 materialize_secrets(REPO_ROOT, adjusted, vault)
             self.assertFalse(target.exists())
+
+    def test_initialize_secrets_creates_each_record_with_cas_zero(self) -> None:
+        manifest = load_manifest(REPO_ROOT, "dev/environments/admin-console.yaml")
+
+        class EmptyVault(FakeVault):
+            def __init__(self) -> None:
+                super().__init__({})
+                self.puts: list[tuple[str, dict[str, object], int]] = []
+
+            def get(self, path: str, version: int | None = None) -> VaultRecord:
+                raise OperationError(f"missing {path}")
+
+            def put_json_cas(self, path: str, value: dict[str, object], cas: int) -> int:
+                self.puts.append((path, value, cas))
+                return len(self.puts)
+
+        vault = EmptyVault()
+        versions = initialize_secrets(manifest, vault)
+        self.assertEqual(set(versions), {
+            manifest.vault["runtime_path"],
+            manifest.vault["bootstrap_path"],
+        })
+        self.assertTrue(all(cas == 0 for _, _, cas in vault.puts))
+        runtime = next(value for path, value, _ in vault.puts if path == manifest.vault["runtime_path"])
+        self.assertEqual(
+            len(base64.b64decode(str(runtime["admin_auth_key_b64"]), validate=True)),
+            32,
+        )
+        bootstrap = next(value for path, value, _ in vault.puts if path == manifest.vault["bootstrap_path"])
+        self.assertEqual(bootstrap["owner_login"], "admin@example.test")
+        self.assertNotIn(str(bootstrap["owner_password"]), json.dumps(versions))
 
     @mock.patch("operations.ssl.PEM_cert_to_DER_cert", return_value=b"root-der")
     def test_caddy_archive_requires_complete_authority(self, _mock: mock.Mock) -> None:

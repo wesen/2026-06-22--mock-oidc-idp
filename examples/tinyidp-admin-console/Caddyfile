@@ -1,0 +1,8 @@
+{
+	skip_install_trust
+}
+
+https://idp.localhost:8443 {
+	tls internal
+	reverse_proxy idp:8081
+}

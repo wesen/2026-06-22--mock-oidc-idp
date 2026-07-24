@@ -9,6 +9,7 @@ vault:
   deployment: shared-two-apps
   runtime_path: tiny-idp/dev/shared-two-apps/runtime
   bootstrap_path: tiny-idp/dev/shared-two-apps/bootstrap
+  owner_login: admin@example.test
   pki_path: tiny-idp/dev/_shared/caddy-local/pki-storage
   caddyfile: examples/tinyidp-shared-two-apps/Caddyfile
 required_tools: [docker, vault, jq, base64]

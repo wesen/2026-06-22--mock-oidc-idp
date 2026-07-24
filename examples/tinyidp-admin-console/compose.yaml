@@ -1,0 +1,140 @@
+name: tinyidp-admin-console
+
+services:
+  proxy:
+    image: caddy:2.10.2-alpine
+    ports: ["8443:8443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [idp-backend]
+
+  ca-export:
+    image: alpine:3.22
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        source=/caddy-data/caddy/pki/authorities/local/root.crt
+        for attempt in $$(seq 1 60); do
+          if [ -s "$$source" ]; then
+            cp "$$source" /trust/caddy-local-root.crt
+            chmod 0444 /trust/caddy-local-root.crt
+            exit 0
+          fi
+          sleep 1
+        done
+        echo "Caddy local root certificate was not generated" >&2
+        exit 1
+    volumes:
+      - caddy-data:/caddy-data:ro
+      - local-ca:/trust
+    depends_on:
+      proxy:
+        condition: service_started
+    restart: "no"
+    networks: [idp-backend]
+
+  mailpit:
+    image: axllent/mailpit:v1.30.5
+    ports: ["127.0.0.1:8025:8025"]
+    networks: [idp-backend]
+
+  idp:
+    build:
+      context: ../..
+      dockerfile: examples/tinyidp-shared-two-apps/Dockerfile.idp
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        umask 077
+        mkdir -p /state/audit /state/admin-artifacts
+        if [ ! -s /state/tinyidp.sqlite ]; then
+          tinyidp admin --db=/state/tinyidp.sqlite init \
+            --generate-signing-key --kid=admin-console-local-initial
+          tinyidp admin --db=/state/tinyidp.sqlite console bootstrap \
+            --owner-login=admin@example.test \
+            --owner-password-file=/state/.secrets/owner-password.txt \
+            --owner-email=admin@example.test \
+            --owner-display-name='Local Administrator' \
+            --public-base-url=https://idp.localhost:8443
+        else
+          tinyidp admin --db=/state/tinyidp.sqlite migrate
+          tinyidp admin --db=/state/tinyidp.sqlite console status >/dev/null
+        fi
+        exec tinyidp serve-production \
+          --addr=:8081 \
+          --admin-addr=127.0.0.1:9090 \
+          --listener-mode=trusted-proxy-http \
+          --issuer=https://idp.localhost:8443 \
+          --clients-file=/config/clients.json \
+          --theme-dir=/config \
+          --theme-catalog-file=/config/themes.json \
+          --signup-program-file=/config/open-signup.js \
+          --db=/state/tinyidp.sqlite \
+          --audit-path=/state/audit/audit.jsonl \
+          --token-secret-file=/state/.secrets/token.key \
+          --admin-auth-key-file=/state/.secrets/admin-auth.key \
+          --admin-action-key-file=/state/.secrets/admin-action.key \
+          --admin-backup-root=/state/admin-artifacts \
+          --invitation-lookup-key-file=/state/.secrets/invitation-lookup.key \
+          --email-challenge-key-file=/state/.secrets/email-challenge.key \
+          --email-smtp-address=mailpit:1025 \
+          --email-smtp-tls-mode=private-plaintext \
+          --email-from-address=accounts@idp.localhost \
+          --email-from-name=TinyIDP \
+          --trusted-proxy-cidrs=172.16.0.0/12 \
+          --rate-limit=500 \
+          --account-chooser
+    depends_on:
+      ca-export:
+        condition: service_completed_successfully
+      mailpit:
+        condition: service_started
+    networks: [idp-backend]
+    volumes:
+      - idp-state:/state
+      - ./clients.json:/config/clients.json:ro
+      - ./themes.json:/config/themes.json:ro
+      - ./admin-console.css:/config/admin-console.css:ro
+      - ../tinyidp-shared-two-apps/open-signup.js:/config/open-signup.js:ro
+      - local-ca:/trust:ro
+    secrets:
+      - token_key
+      - admin_auth_key
+      - admin_action_key
+      - invitation_lookup_key
+      - email_challenge_key
+      - owner_password
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -H 'Host: idp.localhost:8443' http://127.0.0.1:8081/readyz >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 36
+
+networks:
+  idp-backend:
+
+volumes:
+  idp-state:
+  caddy-data:
+    external: true
+    name: tinyidp-local-caddy-pki
+  caddy-config:
+  local-ca:
+
+secrets:
+  token_key:
+    file: ./runtime/secrets/token.key
+  admin_auth_key:
+    file: ./runtime/secrets/admin-auth.key
+  admin_action_key:
+    file: ./runtime/secrets/admin-action.key
+  invitation_lookup_key:
+    file: ./runtime/secrets/invitation-lookup.key
+  email_challenge_key:
+    file: ./runtime/secrets/email-challenge.key
+  owner_password:
+    file: ./runtime/secrets/owner-password.txt
