@@ -57,12 +57,12 @@
 
 - [x] Implement Vault-backed secret materialization for the local admin-console stack <!-- t:j56c -->
 - [x] Wire the admin-console Compose stack to the persistent tinyidp-local-caddy-pki volume <!-- t:mosk -->
-- [ ] Add idempotent bootstrap, CA export, and certificate-verifying smoke scripts <!-- t:3xkd -->
-- [ ] Document and test secret rotation and failure behavior <!-- t:8z7g -->
-- [ ] Implement manifest-driven devctl profiles for every runnable TinyIDP example and demo <!-- t:fkur -->
+- [x] Add idempotent bootstrap, CA export, and certificate-verifying smoke scripts <!-- t:3xkd -->
+- [x] Document and test secret rotation and failure behavior <!-- t:8z7g -->
+- [x] Implement manifest-driven devctl profiles for every runnable TinyIDP example and demo <!-- t:fkur -->
 - [x] Implement Vault KV v2 tier/deployment layout and atomic secret materialization <!-- t:1wda -->
 - [x] Implement guarded Caddy storage backup and staging restore through Vault with CAS and fingerprint verification <!-- t:umal -->
-- [ ] Refactor shared-two-apps, admin-console, and Jitsi onto reusable HTTPS and Caddy PKI patterns <!-- t:c0f5 -->
-- [ ] Migrate embedded, external Message Desk, message-app, script, config, and user demos into devctl profiles <!-- t:bbyx -->
+- [x] Refactor shared-two-apps, admin-console, and Jitsi onto reusable HTTPS and Caddy PKI patterns <!-- t:c0f5 -->
+- [x] Migrate embedded, external Message Desk, message-app, script, config, and user demos into devctl profiles <!-- t:bbyx -->
 - [x] Add the Glazed tutorial for building and validating local TinyIDP applications <!-- t:ixlg -->
 - [ ] Run a non-destructive CA recovery drill and the complete per-profile acceptance matrix <!-- t:uy3a -->

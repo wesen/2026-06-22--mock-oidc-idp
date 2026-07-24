@@ -3004,3 +3004,216 @@ It passed unchanged when run with approved host-cache access.
   `go run ./cmd/tinyidp help tutorial-local-development-apps`.
 - Do not mark the admin runtime smoke as passing until `/readyz`, `/admin`, and
   the unauthenticated API boundaries have been exercised through Caddy.
+
+## Step 19 — unify the HTTPS examples and guard application-state reset
+
+### Prompt context
+
+The active implementation goal requires completing the ticket, maintaining a
+detailed diary, checking tasks only when evidence supports them, and committing
+at useful review boundaries. Runtime debugging remained paused after the
+two-attempt limit in Step 18, so this interval focused on deterministic
+control-plane, configuration, and test work.
+
+### What I did
+
+- Replaced the local random/deterministic secret generators in
+  `shared-two-apps` and Jitsi with compatibility entrypoints that delegate to
+  one repository-owned Vault bootstrap command.
+- Added `dev/scripts/bootstrap-vault-profile.sh`. It accepts only the three
+  production-shaped profiles, ensures the manually retained Caddy volume, then
+  runs the profile's CAS-protected `secrets-init` and atomic `secrets-fetch`.
+- Extended the shared and Jitsi manifests so `prepare.run` materializes every
+  TinyIDP runtime key, bootstrap password, and integration credential.
+- Added safe derived-secret templates to the manifest contract. A single
+  Vault-generated PostgreSQL password now derives:
+  - the PostgreSQL password file;
+  - the DSN file used by the one-shot goja bootstrap;
+  - the Glazed YAML config mounted into the distroless goja host.
+- Restricted derived templates to simple same-record peer fields without
+  formatting, conversion, attribute access, or indexing. Existing derived
+  values must exactly match recomputation or materialization fails before
+  promotion.
+- Changed PostgreSQL to `POSTGRES_PASSWORD_FILE` and goja to
+  `--config-file=/run/secrets/goja_auth_config`. The database credential is no
+  longer in Compose YAML, rendered Compose environment, or process arguments.
+- Changed Jitsi JWT, Jicofo, and JVB credentials to printable Vault text. These
+  values are intentionally printable because the official Jitsi entrypoints
+  place them in generated configuration/environment; arbitrary binary values
+  were not a valid contract.
+- Mounted the Vault-provided token/admin/invitation/email key files into both
+  TinyIDP containers and removed their per-volume token generation.
+- Removed fixed Docker subnets, fixed addresses, and `extra_hosts` entries.
+  Caddy now owns public hostname aliases on each Compose network, while
+  container-local health checks use loopback.
+- Removed Mailpit's committed local password. Its operator endpoint remains
+  loopback-only.
+- Refactored both Playwright suites and the Python acceptance script to read
+  materialized password files instead of committed deterministic values.
+- Added `dev/scripts/compose-state.sh` with:
+  - read-only `state-status`;
+  - exact typed confirmation for every reset;
+  - a protected reset mode that verifies the Compose declaration for the
+    external Caddy volume before teardown and compares its creation/mount
+    identity afterward;
+  - a local reset mode for the HTTP-only external Message Desk demo.
+- Migrated the external Message Desk README and manifest to devctl-first
+  launch, status, logs, shutdown, and guarded reset.
+- Documented the intentional one-time migration boundary: existing SQLite
+  hashes created with the old fixture passwords require a guarded application
+  state reset. The implementation does not silently import legacy credentials
+  or add a compatibility path.
+
+### Commands and evidence
+
+The control-plane suite grew from 15 to 23 tests:
+
+```text
+python3 -m unittest discover -s devctl/tests -v
+Ran 23 tests
+OK
+```
+
+New coverage proves:
+
+- every production-shaped profile has guarded status/reset commands;
+- Compose secret declarations cover every materialized output;
+- the old bootstrap filenames delegate to the shared Vault bootstrap and
+  contain no `/dev/urandom` or deterministic password;
+- a reset without typed confirmation returns exit 2 before Docker mutation;
+- attribute traversal in a derived template is rejected;
+- goja's DSN and Glazed config derive from the same Vault password;
+- a stale or tampered derived value prevents any target promotion.
+
+All production-shaped Compose files parsed successfully:
+
+```text
+docker compose -f examples/tinyidp-admin-console/compose.yaml config --quiet
+docker compose -f examples/tinyidp-shared-two-apps/compose.yaml config --quiet
+docker compose -f examples/tinyidp-jitsi/compose.yaml config --quiet
+```
+
+The refactored browser suites loaded and enumerated without executing servers:
+
+```text
+shared-two-apps: 28 Playwright tests in 1 file
+jitsi:           8 Playwright tests in 1 file
+```
+
+The external Message Desk profile produced a valid plan and the live dynamic
+command refused an unconfirmed reset:
+
+```text
+devctl --profile external-message-desk state-reset
+refusing state reset; rerun with --confirm reset-external-message-desk-state
+Error: command "state-reset" failed with exit_code=2
+```
+
+`docmgr doctor --ticket TINYIDP-ADMIN-CONSOLE-001` reported all checks passed.
+
+Commits:
+
+```text
+6c0d3e5 refactor(dev): unify HTTPS demo secret workflows
+0d7f39d feat(dev): add guarded external demo reset
+```
+
+### What worked
+
+- Compose service aliases replace global subnet reservations without changing
+  the canonical browser issuer.
+- Glazed `--config-file` provides a file-only secret boundary even for the
+  distroless generated goja host, so no shell wrapper or environment secret is
+  necessary.
+- A manifest-derived file can be validated against its source fields before
+  publication, preserving one source of truth while supporting consumer-
+  specific formats.
+- The old `00-init-secrets.sh` filenames remain useful human entrypoints but no
+  longer implement a second secret system.
+- The reset command fails before invoking Docker when confirmation is absent.
+
+### What didn't work
+
+The first attempt to patch the shared script, Jitsi script, manifests, state
+helper, and test in one patch failed because the expected context in
+`test_manifests.py` did not match the actual file:
+
+```text
+apply_patch verification failed:
+Failed to find expected lines in devctl/tests/test_manifests.py
+```
+
+No partial change was applied. I inspected the current test file and applied
+the implementation in smaller patches.
+
+An initial README patch also failed because its expected Jitsi line wrapping
+did not match the current file. Again, no partial patch was applied; the shared
+and Jitsi documentation changes were applied separately.
+
+The first design considered a generated `env_file` for goja's PostgreSQL DSN.
+That would cause the secret to become a process environment value and may
+expose it in rendered configuration. Inspection of go-go-goja showed that the
+generated host already consumes Glazed `--config-file`, so the environment-file
+approach was discarded before commit.
+
+### What I learned
+
+- The same logical Vault field may need multiple consumer files. Derived
+  templates are safer than independently generated values only when the
+  template language is deliberately constrained and recomputed during reads.
+- A distroless image does not imply secrets must be environment variables.
+  An existing application config-file API is the correct file-delivery
+  boundary.
+- Docker network aliases can preserve public TLS hostnames inside a network
+  without hard-coded addresses. This removes address-pool collisions while
+  retaining certificate hostname validation.
+- Migrating password sources without resetting password hashes creates a false
+  "correct configuration, failed login" state. The state/secret coherence
+  boundary must be explicit in the operator documentation.
+
+### What was tricky to build
+
+- The goja database has three consumers with different interfaces:
+  PostgreSQL accepts a password file, the bootstrap command accepts a DSN file,
+  and the long-running generated host accepts Glazed YAML. The derived template
+  contract keeps all three coherent.
+- A reset helper must work for both Caddy-backed and HTTP-only projects without
+  weakening Caddy protection. The two explicit operation modes share typed
+  confirmation but only the protected mode accepts a Caddy-backed profile.
+- Browser tests need secrets only when a flow executes. TypeScript helpers read
+  materialized files lazily so Playwright discovery and TypeScript loading do
+  not require a running environment.
+
+### What warrants a second pair of eyes
+
+- Confirm that accepting `172.16.0.0/12` is appropriate for these isolated
+  local Compose networks. Production must use the exact proxy network.
+- Review the generated goja Glazed YAML field name against the sibling
+  go-go-goja version whenever that dependency changes.
+- Review whether the reset helper should also record volume labels or a state
+  manifest before deletion.
+- Run both full browser suites after the runtime launch blocker is resolved;
+  enumeration proves loading/type transformation, not behavioral acceptance.
+
+### What should be done in the future
+
+- Initialize the shared/Jitsi Vault records only when the owner is ready to
+  perform the documented one-time application-state resets.
+- Complete runtime smoke, restart durability, negative-secret, logout, and
+  scope/audience testing for every server profile.
+- Add state reset for the direct message-app profile if operators need a single
+  command beyond removing its declared `var/devctl/message-app` state root.
+- Diagnose the Step 18 Compose supervision exit in a fresh debugging session.
+
+### Code review instructions
+
+- Begin with the three manifests in `dev/environments/` and compare their
+  `secret_material.files` with the bottom of each Compose file.
+- Review `_render_secret_template` and its parser restrictions before approving
+  derived configuration.
+- Review `dev/scripts/compose-state.sh`; the confirmation check and Caddy
+  declaration check must remain before `docker compose down --volumes`.
+- Run the 23 Python tests and all four Compose `config --quiet` commands.
+- Use `pnpm exec playwright test --list` in both browser-test directories.
+- Do not run a confirmed state reset unless deletion of that profile's
+  application volumes is intentional.

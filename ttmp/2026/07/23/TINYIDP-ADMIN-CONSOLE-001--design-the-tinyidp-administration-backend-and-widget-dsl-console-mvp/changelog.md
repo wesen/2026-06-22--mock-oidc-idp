@@ -96,3 +96,24 @@ diagnostic; server debugging stopped under the repository's two-attempt rule.
 - /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/examples/tinyidp-admin-console/compose.yaml — Production-shaped local admin stack
 - /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/cmd/tinyidp/doc/pages/tutorial-local-development-apps.md — Embedded Glazed playbook
 - /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/ttmp/2026/07/23/TINYIDP-ADMIN-CONSOLE-001--design-the-tinyidp-administration-backend-and-widget-dsl-console-mvp/reference/01-investigation-diary.md — Detailed evidence, failures, and review instructions
+
+## 2026-07-24
+
+Step 19: Unified shared-two-apps and Jitsi on the Vault-backed secret and
+persistent Caddy workflow, removed fixed Docker address pools, file-delivered
+the goja/PostgreSQL integration credentials, migrated browser tests away from
+committed passwords, added guarded state status/reset operations, and made the
+external Message Desk profile devctl-first (commits 6c0d3e5 and 0d7f39d).
+
+The 23-test control-plane suite, three HTTPS Compose renders, external HTTP
+Compose render, profile plans, shell/Python syntax checks, and 36 Playwright
+test enumerations passed. Full server/browser acceptance remains tracked
+separately.
+
+### Related Files
+
+- /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/dev/scripts/bootstrap-vault-profile.sh — Shared Vault/bootstrap entrypoint
+- /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/dev/scripts/compose-state.sh — Guarded profile state operations
+- /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/devctl/lib/manifests.py — Restricted derived-secret template contract
+- /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/examples/tinyidp-shared-two-apps/compose.yaml — File-delivered shared-demo credentials and network aliases
+- /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/examples/tinyidp-jitsi/compose.yaml — Vault-backed Jitsi integration credentials
