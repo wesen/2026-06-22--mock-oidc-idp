@@ -16,6 +16,16 @@ RelatedFiles:
       Note: Renderer transport inspected during frontend design
     - Path: abs:///home/manuel/code/wesen/go-go-golems/upwork/verbs/upwork.js
       Note: Reference implementation inspected during research
+    - Path: repo://.devctl.yaml
+      Note: Profile selection and plugin registration added in control-plane interval
+    - Path: repo://dev/environments/shared-two-apps.yaml
+      Note: Representative production-shaped local environment manifest
+    - Path: repo://devctl/lib/manifests.py
+      Note: Strict environment manifest loader and invariants added in commit 655cd80
+    - Path: repo://devctl/tests/test_plugin.py
+      Note: Protocol, dry-run, and utility-profile contract evidence
+    - Path: repo://devctl/tinyidp.py
+      Note: NDJSON protocol-v2 environment plugin added in commit 655cd80
     - Path: repo://go.mod
       Note: Pins the required rag-evaluation-system Widget DSL provider
     - Path: repo://go.sum
@@ -102,6 +112,7 @@ LastUpdated: 2026-07-23T20:14:57.931345362-04:00
 WhatFor: Preserve how the administration-backend proposal was derived, including concrete evidence, failed assumptions, and review instructions.
 WhenToUse: Read when reviewing the design, implementing a phase, or continuing the investigation.
 ---
+
 
 
 
@@ -2447,4 +2458,164 @@ The uploaded document is:
 TINYIDP ADMIN CONSOLE MVP IMPLEMENTED.pdf
 remote directory: /ai/2026/07/24/TINYIDP-ADMIN-CONSOLE-001
 ToC depth: 2
+```
+
+## Step 16: Establish the manifest-driven devctl control plane
+
+This step began the repository-wide environment-platform implementation by
+turning the design's profile model into executable devctl configuration. The
+first slice deliberately contains no live Vault writes, Docker volume changes,
+or destructive state operations. It establishes the protocol, manifest, and
+planning contracts that later secret and PKI commands can depend on.
+
+Nine profiles now describe the embedded provider, external Message Desk,
+shared HTTPS applications, Jitsi, the administration console, the direct
+message application, script tools, configuration fixtures, and the production
+host reference. A Python protocol-v2 plugin loads and validates these manifests,
+publishes stable configuration, computes launch plans, supports named prepare
+steps, and exposes the closed dynamic-command vocabulary from the design.
+
+### Prompt Context
+
+**User prompt (verbatim):** "Ok, now implement the ticket, keep a detailed diary frequently, check off tasks as you go, commit at appropriate intervals."
+
+**Assistant interpretation:** Implement every outstanding environment-platform
+task in the current ticket, record the work and failures as it happens, check
+tasks only against concrete evidence, and create focused commits at verified
+milestones.
+
+**Inferred user intent:** Replace the collection of ad hoc TinyIDP demo startup
+paths with a secure, maintainable operational platform that another engineer
+can understand, run, recover, and extend.
+
+**Commit (code):** `655cd80` — "feat(dev): add manifest-driven environment control plane"
+
+**Commit (hygiene):** `e46aef6` — "chore(dev): ignore Python bytecode caches"
+
+### What I did
+
+- Audited the clean `feat/tinyidp-admin-console` branch at commit `bd9aad2`.
+- Read the complete ticket diary, task list, unified design, installed devctl
+  help, representative devctl plugins, and the required diary workflow.
+- Added `.devctl.yaml` with nine named profiles and a documented default.
+- Added `devctl/tinyidp.py`, the protocol-v2 plugin.
+- Added `devctl/lib/manifests.py`, a strict YAML loader with repository path
+  confinement and production-shaped HTTPS/Vault invariants.
+- Added one manifest per environment under `dev/environments`.
+- Added plugin and manifest unit tests.
+- Ignored devctl runtime state, local overrides, and direct-profile state.
+- Ran:
+  - `python3 -m unittest discover -s devctl/tests -v`;
+  - `python3 -m py_compile devctl/tinyidp.py devctl/lib/manifests.py`;
+  - `devctl profiles list`;
+  - `devctl plugins list`;
+  - `devctl plan --profile embedded`;
+  - `devctl validate --profile embedded`.
+
+### Why
+
+- Secret retrieval, CA recovery, and state reset are high-impact operations.
+  They require a deterministic selected-environment contract before they can be
+  implemented safely.
+- A profile manifest separates non-secret topology facts from operational
+  behavior while keeping OIDC issuer identity explicit.
+- Dry-run behavior and path confinement need unit tests before plugin commands
+  are allowed to mutate host or Docker state.
+
+### What worked
+
+- devctl discovered all nine profiles and the single `tinyidp` plugin.
+- The plugin handshake registered `config.mutate`, `validate.run`,
+  `prepare.run`, `launch.plan`, and `command.run`.
+- `devctl plan --profile embedded` produced the expected `go run
+  ./examples/embedded` service and loopback health URL.
+- `devctl validate --profile embedded` passed and emitted the intended
+  development-only warning.
+- The dry-run prepare test proved it did not create
+  `var/devctl/message-app`.
+
+### What didn't work
+
+The first unit-test run failed:
+
+```text
+test_production_shaped_profile_requires_https ... FAIL
+devctl.lib.manifests.ManifestError: runtime.services[0].command must be a list of non-empty strings
+AssertionError: "HTTPS issuer" does not match "runtime.services[0].command must be a list of non-empty strings"
+```
+
+The test fixture used `command: [false]`. YAML interpreted the unquoted scalar
+as Boolean `false`, so the command validator correctly rejected it before
+reaching the HTTPS assertion. The fixture was changed to `command: ["false"]`.
+
+The first implementation commit also included generated `__pycache__/*.pyc`
+files because the repository had no Python bytecode ignore rule. Rather than
+rewriting the published interval, commit `e46aef6` removed the six generated
+files and added:
+
+```text
+__pycache__/
+*.py[cod]
+```
+
+### What I learned
+
+- YAML scalar typing is part of the manifest security boundary. Command argv is
+  intentionally strings-only, which catches accidental booleans and numbers
+  before they reach `subprocess`.
+- The installed devctl registers plugin commands directly as `devctl <name>`;
+  there is no `devctl command <name>` wrapper.
+- Profile environment values reach the plugin process, allowing
+  `TINYIDP_DEV_MANIFEST` to remain a non-secret selector.
+
+### What was tricky to build
+
+- `config.mutate` runs before other operations, so the manifest selector must
+  work from the profile process environment initially and from merged config
+  on subsequent calls.
+- Paths supplied by manifests must remain inside `ctx.repo_root`. Resolving
+  first and then checking `relative_to(root)` prevents `..` escapes and
+  symlink-based escape paths.
+- Utility profiles legitimately produce no services, whereas process and
+  Compose profiles must produce at least one.
+
+### What warrants a second pair of eyes
+
+- Review whether PyYAML should become an explicitly pinned developer
+  dependency or whether the loader should move into a Go plugin later.
+- Review each manifest's classification and whether every current example has
+  the correct primary mode.
+- Confirm that a single supervised `docker compose up` process gives the
+  desired devctl stop semantics for all Compose versions in use.
+
+### What should be done in the future
+
+- Add Vault/PKI command implementations behind the closed dynamic command set.
+- Add the missing administration-console Compose example before that profile
+  can validate.
+- Run plan and validation against every profile, then start real servers in
+  tmux for runtime acceptance.
+
+### Code review instructions
+
+- Start with `.devctl.yaml`, then read `devctl/lib/manifests.py` before
+  `devctl/tinyidp.py`.
+- Compare each `dev/environments/*.yaml` entry with its existing example
+  README and launch command.
+- Run `python3 -m unittest discover -s devctl/tests -v`.
+- Run `devctl profiles list`, `devctl plugins list`, and
+  `devctl plan --profile embedded`.
+
+### Technical details
+
+The initial stable configuration namespace is:
+
+```text
+env.TINYIDP_DEV_MANIFEST
+environment.name
+environment.classification
+environment.runtime_kind
+environment.issuer
+vault.*
+services.<name>.health_url
 ```

@@ -62,3 +62,12 @@ Added the Vault-backed local TLS and secret provisioning design, including trust
 ## 2026-07-24
 
 Added the unified TinyIDP development and demo environment platform design. It inventories existing examples and specifies manifest-driven devctl profiles, consistent dev/production Vault paths, versioned Caddy private-CA storage backup and guarded restore, shared Compose patterns, an example migration program, a Glazed local-app tutorial, and an acceptance matrix. Superseded the earlier no-CA-backup decision in design document 02.
+
+## 2026-07-24
+
+Step 16: Established the manifest-driven devctl control plane for nine TinyIDP profiles, added protocol and manifest tests, and corrected generated Python bytecode staging (commits 655cd80 and e46aef6).
+
+### Related Files
+
+- /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/.devctl.yaml — Environment profiles
+- /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/devctl/tinyidp.py — Control-plane implementation
