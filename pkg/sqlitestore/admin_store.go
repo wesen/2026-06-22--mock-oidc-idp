@@ -3,6 +3,7 @@ package sqlitestore
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
 	"errors"
@@ -184,6 +185,83 @@ func (s *Store) RevokeAdminSession(ctx context.Context, idHash []byte, at time.T
 		UPDATE admin_sessions SET revoked_at_ns=? WHERE id_hash=? AND revoked_at_ns IS NULL`,
 		at.UnixNano(), idHash)
 	return requireOne(result, err, idpadminstore.ErrNotFound)
+}
+
+func (s *Store) TouchAdminSession(ctx context.Context, idHash []byte, seenAt time.Time) error {
+	result, err := s.conn().ExecContext(ctx, `
+		UPDATE admin_sessions SET last_seen_at_ns=?
+		WHERE id_hash=? AND revoked_at_ns IS NULL AND expires_at_ns>?`,
+		seenAt.UnixNano(), idHash, seenAt.UnixNano())
+	return requireOne(result, err, idpadminstore.ErrNotFound)
+}
+
+func (s *Store) RotateAdminSessionCSRF(ctx context.Context, idHash, csrfHash []byte, now time.Time) error {
+	result, err := s.conn().ExecContext(ctx, `
+		UPDATE admin_sessions SET csrf_hash=?, last_seen_at_ns=?
+		WHERE id_hash=? AND revoked_at_ns IS NULL AND expires_at_ns>?`,
+		csrfHash, now.UnixNano(), idHash, now.UnixNano())
+	return requireOne(result, err, idpadminstore.ErrNotFound)
+}
+
+func (s *Store) CreateAdminAuthAttempt(ctx context.Context, attempt idpadminstore.AuthAttempt) error {
+	_, err := s.conn().ExecContext(ctx, `
+		INSERT INTO admin_auth_attempts
+			(state_hash, nonce_hash, pkce_verifier_box, return_path, browser_binding_hash,
+			 created_at_ns, expires_at_ns, consumed_at_ns)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		attempt.StateHash, attempt.NonceHash, attempt.PKCEVerifierBox, attempt.ReturnPath,
+		attempt.BrowserBindingHash, attempt.CreatedAt.UnixNano(), attempt.ExpiresAt.UnixNano(),
+		nullableTime(attempt.ConsumedAt))
+	if isConstraint(err) {
+		return idpadminstore.ErrDuplicate
+	}
+	return err
+}
+
+func (s *Store) ConsumeAdminAuthAttempt(
+	ctx context.Context,
+	stateHash, browserBindingHash []byte,
+	now time.Time,
+) (idpadminstore.AuthAttempt, error) {
+	if s.runner == nil {
+		var result idpadminstore.AuthAttempt
+		err := s.AdminUpdate(ctx, func(_ idpstore.TxStore, admin idpadminstore.TxStore) error {
+			var err error
+			result, err = admin.ConsumeAdminAuthAttempt(ctx, stateHash, browserBindingHash, now)
+			return err
+		})
+		return result, err
+	}
+	var attempt idpadminstore.AuthAttempt
+	var created, expires int64
+	var consumed sql.NullInt64
+	err := s.conn().QueryRowContext(ctx, `
+		SELECT state_hash, nonce_hash, pkce_verifier_box, return_path, browser_binding_hash,
+		       created_at_ns, expires_at_ns, consumed_at_ns
+		FROM admin_auth_attempts WHERE state_hash=?`, stateHash).
+		Scan(&attempt.StateHash, &attempt.NonceHash, &attempt.PKCEVerifierBox, &attempt.ReturnPath,
+			&attempt.BrowserBindingHash, &created, &expires, &consumed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return idpadminstore.AuthAttempt{}, idpadminstore.ErrNotFound
+	}
+	if err != nil {
+		return idpadminstore.AuthAttempt{}, err
+	}
+	if consumed.Valid || expires <= now.UnixNano() ||
+		subtle.ConstantTimeCompare(attempt.BrowserBindingHash, browserBindingHash) != 1 {
+		return idpadminstore.AuthAttempt{}, idpadminstore.ErrNotFound
+	}
+	result, err := s.conn().ExecContext(ctx, `
+		UPDATE admin_auth_attempts SET consumed_at_ns=?
+		WHERE state_hash=? AND consumed_at_ns IS NULL AND expires_at_ns>?`,
+		now.UnixNano(), stateHash, now.UnixNano())
+	if err := requireOne(result, err, idpadminstore.ErrNotFound); err != nil {
+		return idpadminstore.AuthAttempt{}, err
+	}
+	attempt.CreatedAt = time.Unix(0, created).UTC()
+	attempt.ExpiresAt = time.Unix(0, expires).UTC()
+	attempt.ConsumedAt = &now
+	return attempt, nil
 }
 
 func (s *Store) CreateActionNonce(ctx context.Context, nonce, sessionID string, expiresAt time.Time) error {

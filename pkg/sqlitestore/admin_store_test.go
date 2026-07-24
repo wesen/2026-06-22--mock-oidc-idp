@@ -139,6 +139,31 @@ func TestAdminUserProjectionRebuildMatchesCanonicalState(t *testing.T) {
 	}
 }
 
+func TestAdminAuthAttemptIsBoundAndConsumedOnce(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	now := time.Date(2026, 7, 24, 1, 0, 0, 0, time.UTC)
+	attempt := idpadminstore.AuthAttempt{
+		StateHash: []byte("state-hash"), NonceHash: []byte("nonce-hash"),
+		PKCEVerifierBox: []byte("encrypted-verifier"), ReturnPath: "/admin/users",
+		BrowserBindingHash: []byte("browser-binding"), CreatedAt: now, ExpiresAt: now.Add(5 * time.Minute),
+	}
+	requireNoError(t, st.CreateAdminAuthAttempt(ctx, attempt))
+	_, err := st.ConsumeAdminAuthAttempt(ctx, attempt.StateHash, []byte("wrong-binding"), now)
+	if !errors.Is(err, idpadminstore.ErrNotFound) {
+		t.Fatalf("wrong binding error = %v", err)
+	}
+	got, err := st.ConsumeAdminAuthAttempt(ctx, attempt.StateHash, attempt.BrowserBindingHash, now)
+	requireNoError(t, err)
+	if got.ReturnPath != attempt.ReturnPath || got.ConsumedAt == nil {
+		t.Fatalf("consumed attempt = %#v", got)
+	}
+	_, err = st.ConsumeAdminAuthAttempt(ctx, attempt.StateHash, attempt.BrowserBindingHash, now)
+	if !errors.Is(err, idpadminstore.ErrNotFound) {
+		t.Fatalf("replay error = %v", err)
+	}
+}
+
 func requireNoError(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {

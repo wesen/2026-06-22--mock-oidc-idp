@@ -32,6 +32,17 @@ type Session struct {
 	RevokedAt       *time.Time
 }
 
+type AuthAttempt struct {
+	StateHash          []byte
+	NonceHash          []byte
+	PKCEVerifierBox    []byte
+	ReturnPath         string
+	BrowserBindingHash []byte
+	CreatedAt          time.Time
+	ExpiresAt          time.Time
+	ConsumedAt         *time.Time
+}
+
 type Action struct {
 	ID              string
 	Nonce           string
@@ -87,7 +98,14 @@ type GrantStore interface {
 type SessionStore interface {
 	CreateAdminSession(ctx context.Context, session Session) error
 	GetAdminSession(ctx context.Context, idHash []byte) (Session, error)
+	TouchAdminSession(ctx context.Context, idHash []byte, seenAt time.Time) error
+	RotateAdminSessionCSRF(ctx context.Context, idHash, csrfHash []byte, now time.Time) error
 	RevokeAdminSession(ctx context.Context, idHash []byte, at time.Time) error
+}
+
+type AuthAttemptStore interface {
+	CreateAdminAuthAttempt(ctx context.Context, attempt AuthAttempt) error
+	ConsumeAdminAuthAttempt(ctx context.Context, stateHash, browserBindingHash []byte, now time.Time) (AuthAttempt, error)
 }
 
 type SecurityStore interface {
@@ -104,6 +122,7 @@ type SecurityStore interface {
 type TxStore interface {
 	GrantStore
 	SessionStore
+	AuthAttemptStore
 	SecurityStore
 }
 

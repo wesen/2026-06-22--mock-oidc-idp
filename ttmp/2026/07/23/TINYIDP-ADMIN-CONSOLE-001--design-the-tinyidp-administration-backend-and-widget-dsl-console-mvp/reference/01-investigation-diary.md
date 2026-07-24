@@ -16,8 +16,16 @@ RelatedFiles:
       Note: Renderer transport inspected during frontend design
     - Path: abs:///home/manuel/code/wesen/go-go-golems/upwork/verbs/upwork.js
       Note: Reference implementation inspected during research
+    - Path: repo://go.mod
+      Note: Pins the required rag-evaluation-system Widget DSL provider
+    - Path: repo://go.sum
+      Note: Checksums Widget DSL and resolved dependency versions
     - Path: repo://internal/admin/service.go
       Note: Evidence inspected during current-state research
+    - Path: repo://internal/adminweb/auth.go
+      Note: OIDC PKCE, encrypted auth attempt, admin session, current-grant, and CSRF boundary
+    - Path: repo://internal/adminweb/auth_test.go
+      Note: Login, callback, cookie, session, CSRF, return-path, and grant invalidation tests
     - Path: repo://internal/cmds/admin.go
       Note: Registers the console operator command group
     - Path: repo://internal/cmds/admin_console.go
@@ -68,6 +76,7 @@ LastUpdated: 2026-07-23T20:14:57.931345362-04:00
 WhatFor: Preserve how the administration-backend proposal was derived, including concrete evidence, failed assumptions, and review instructions.
 WhenToUse: Read when reviewing the design, implementing a phase, or continuing the investigation.
 ---
+
 
 
 
@@ -781,4 +790,135 @@ verify signed handle
      -> enqueue sanitized audit payload
      -> persist non-secret idempotency result
   -> COMMIT
+```
+
+## Step 7: Implement the Phase B authentication and session foundation
+
+Phase B began with the backend security boundary rather than route or frontend work. The new `internal/adminweb.AuthManager` implements a public OIDC authorization-code flow with PKCE, encrypted server-side attempts, browser binding, nonce verification, a dedicated admin session cookie, grant-backed principal reconstruction, CSRF token rotation, logout, and immediate session invalidation when the backing grant changes.
+
+The Widget DSL dependency was also resolved against the current repositories. The Go runtime provider is `github.com/go-go-golems/rag-evaluation-system/pkg/xgoja/providers/widgetsite` at v0.1.7, matching the Upwork backend configuration. The published React renderer is `@go-go-golems/rag-evaluation-site` v0.1.19.
+
+### Prompt Context
+
+**User prompt (verbatim):** (same as Step 4)
+
+**Assistant interpretation:** Start the authenticated read-only console phase at the security boundary, verify it independently, and keep unsafe general-purpose xgoja modules out of the design.
+
+**Inferred user intent:** Ensure the web console proves identity and current server-side authorization before any Widget DSL page or API becomes reachable.
+
+### What I did
+
+- Added the rag-evaluation-system Go module at the same provider version used by Upwork.
+- Extended `idpadminstore` and SQLite with:
+  - create/consume auth attempts;
+  - browser-binding comparison;
+  - one-time atomic consumption;
+  - session touch;
+  - CSRF hash rotation.
+- Added `internal/adminweb/auth.go` with:
+  - OIDC discovery and verifier adapter;
+  - authorization-code + S256 PKCE start;
+  - authenticated encryption of the PKCE verifier and raw nonce;
+  - HMAC-domain-separated state, nonce, binding, session, and CSRF hashes;
+  - fixed-client token exchange and ID-token verification;
+  - active grant lookup by subject and system scope;
+  - HttpOnly/Secure/SameSite=Lax cookies;
+  - rotating in-memory CSRF bootstrap responses;
+  - authentication plus exact-origin and synchronizer-token CSRF middleware;
+  - session logout and grant-version invalidation.
+- Added HTTP tests without opening real sockets.
+
+### Why
+
+- The browser must never be the authoritative store for PKCE verifier, expected nonce, return path, grant, or capability.
+- State alone does not bind a login attempt to the browser that initiated it.
+- An authenticated ID token proves a subject but does not grant administration authority.
+- CSRF material should be returned into application memory and stored only as a keyed hash server-side.
+- Every request must observe current grant revocation/version rather than trusting the version captured at login indefinitely.
+
+### What worked
+
+- `internal/adminweb` and `pkg/sqlitestore` tests pass.
+- The login test proves S256 challenge and nonce generation plus HttpOnly/Secure browser-binding cookie behavior.
+- The callback test proves server-side attempt consumption, token exchange, nonce validation, owner-grant lookup, safe return path, and secure session cookie issuance.
+- The session endpoint returns a new CSRF token but never returns the raw session handle.
+- Revoking the owner grant immediately turns an already-issued admin session into HTTP 401.
+- An absolute external return URL is rejected with HTTP 400.
+
+### What didn't work
+
+- The originally referenced frontend path no longer exists:
+
+  ```text
+  sed: can't read /home/manuel/code/wesen/go-go-golems/rag-evaluation-system/packages/widget-dsl/package.json: No such file or directory
+  ```
+
+  The current frontend package is `packages/rag-evaluation-site`; `widget.dsl`
+  itself is the Go/xgoja provider under `pkg/widgetdsl` and
+  `pkg/xgoja/providers/widgetsite`.
+
+- A later inspection assumed a source-root `index.ts`, but this package exposes
+  generated root entrypoints and keeps widget exports under `src/widgets`:
+
+  ```text
+  sed: can't read /home/manuel/code/wesen/go-go-golems/rag-evaluation-system/packages/rag-evaluation-site/index.ts: No such file or directory
+  ```
+
+  Package exports were verified from `package.json` and `src/widgets/index.ts`.
+
+### What I learned
+
+- The Upwork runtime selects `widget.dsl` from the `rag-widget-site` provider; it separately enables host filesystem and database modules. TinyIDP must select only the Widget provider and its own narrow `tinyidp.admin` module.
+- Migration 16 can keep one encrypted blob column: the AEAD plaintext contains both PKCE verifier and raw nonce, while `nonce_hash` remains independently comparable evidence.
+- The admin session cannot persist a recoverable CSRF token. `GET /api/admin/session` rotates the hash and returns the new raw value to frontend memory.
+- `go get` upgraded transitive Goja, SQLite, Glamour, Chroma, and display-width dependencies while adding rag-evaluation-system; full repository verification is required at this commit boundary.
+
+### What was tricky to build
+
+- OIDC nonce validation requires the raw nonce after callback; a hash alone cannot be supplied to an ID-token verifier. Encrypting the nonce with the PKCE verifier preserves server ownership without storing plaintext.
+- Return paths must be relative `/admin...` paths with no scheme, host, protocol-relative prefix, or fragment.
+- The session cookie covers `/admin`, which also covers `/admin/auth` and `/admin`-scoped APIs only if routing is chosen consistently. Public API mounting will preserve this boundary.
+- Authentication middleware reconstructs assurance from the persisted authentication time and separately rechecks grant subject, active state, and version.
+
+### What warrants a second pair of eyes
+
+- Review the eight-hour admin session TTL and five-minute fresh-auth window.
+- Review the session cookie's `/` path. It is required because the console UI is
+  `/admin` while its APIs are `/api/admin`; HttpOnly, Secure, SameSite, host-only
+  scope, and server-side hashing still constrain the cookie.
+- Review the dependency upgrades introduced by rag-evaluation-system v0.1.7.
+- Review whether callback failures should receive a rendered browser error page rather than concise HTTP text.
+
+### What should be done in the future
+
+- Mount authentication and session endpoints on the public production listener.
+- Preserve exact-origin validation for every state-changing endpoint as routes are added.
+- Add bounded auth-attempt/session retention to maintenance.
+- Add the safe Widget DSL runtime and read-only query endpoints.
+
+### Code review instructions
+
+- Review `internal/adminweb/auth.go` from `LoginHandler` through `CallbackHandler`, then `principal`.
+- Inspect the SQLite compare-and-consume query for auth attempts.
+- Run:
+
+  ```text
+  GOCACHE=/tmp/tinyidp-admin-go-cache go test ./internal/adminweb ./pkg/sqlitestore
+  ```
+
+### Technical details
+
+```text
+GET /admin/auth/login
+  -> random state, nonce, verifier, browser binding
+  -> store H(state), H(nonce), AEAD(verifier+nonce), H(binding)
+  -> redirect to /authorize with PKCE S256
+
+GET /admin/auth/callback
+  -> atomically consume attempt by H(state)+H(binding)
+  -> decrypt verifier+nonce
+  -> exchange code and verify ID token+nonce
+  -> load active current owner grant
+  -> store H(session), grant ID/version, H(CSRF placeholder)
+  -> set HttpOnly admin session cookie
 ```
