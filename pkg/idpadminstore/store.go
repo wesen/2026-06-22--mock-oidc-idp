@@ -135,8 +135,17 @@ type ProjectionStore interface {
 	CheckAdminUserProjection(ctx context.Context, now time.Time) (ProjectionReport, error)
 }
 
+type ReadModelStore interface {
+	GetAdminOverview(ctx context.Context, now time.Time) (idpadmin.Overview, error)
+	ListAdminUsers(ctx context.Context, filter idpadmin.UserFilter, limit int) ([]idpadmin.UserRow, error)
+	ListAdminActivity(ctx context.Context, limit int) ([]idpadmin.ActivityRow, error)
+	ListAdminOperations(ctx context.Context, limit int) (idpadmin.OperationsView, error)
+	ListAdminInvitations(ctx context.Context, now time.Time, limit int) ([]idpadmin.InvitationRow, error)
+}
+
 type Store interface {
 	TxStore
 	AtomicStore
 	ProjectionStore
+	ReadModelStore
 }

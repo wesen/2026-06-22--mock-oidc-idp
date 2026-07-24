@@ -18,10 +18,10 @@
 
 ## Phase B — Authenticated read-only console
 
-- [ ] Add dedicated public PKCE OIDC login and admin sessions.
-- [ ] Mount `/admin`, `/api/admin`, `/api/widget`, and `/static/admin` on the public listener.
-- [ ] Add safe `tinyidp.admin` and `widget.dsl` xgoja modules.
-- [ ] Add pnpm/React/Redux/RTK Query/Bootstrap frontend and read-only pages.
+- [x] Add dedicated public PKCE OIDC login and admin sessions.
+- [x] Mount `/admin`, `/api/admin`, `/api/widget`, and `/static/admin` on the public listener.
+- [x] Add safe `tinyidp.admin` and `widget.dsl` xgoja modules.
+- [x] Add pnpm/React/Redux/RTK Query/Bootstrap frontend and read-only pages.
 
 ## Phase C — User operations
 

@@ -104,6 +104,8 @@ type AdminPrincipal struct {
 	SessionID     string
 	Authenticated time.Time
 	Assurance     Assurance
+	GrantID       string
+	GrantVersion  int64
 }
 
 func (p AdminPrincipal) Validate() error {

@@ -922,3 +922,235 @@ GET /admin/auth/callback
   -> store H(session), grant ID/version, H(CSRF placeholder)
   -> set HttpOnly admin session cookie
 ```
+
+## Step 8: Complete the authenticated read-only console
+
+Phase B now reaches the production listener rather than ending at isolated
+authentication primitives. The implementation adds bounded read models, a
+fresh-per-render Goja runtime containing only `widget.dsl` and
+`tinyidp.admin`, the public HTTP surface, and a compiled React application.
+Production startup performs OIDC discovery through the provider's in-process
+transport before opening the listener, so startup neither depends on a
+hairpin network request nor races the server it is constructing.
+
+### Prompt Context
+
+**User prompt (verbatim):** `what's next?`
+
+**Assistant interpretation:** Continue implementing the ticket through the
+next coherent, verified commit boundary.
+
+**Inferred user intent:** Deliver the actual administration console in
+reviewable phases rather than stop after writing its design.
+
+### What I did
+
+- Added parameterized SQLite read queries for:
+  - overview counters;
+  - bounded user search and status filtering;
+  - activity;
+  - operation health;
+  - invitation metadata.
+- Added `idpadminapp.PageDataService`, which reloads the principal's current
+  grant and authorizes the page-specific capability before executing a query.
+- Added a constrained Widget DSL runtime:
+  - a new Goja VM for every render;
+  - only `widget.dsl` and the narrow `tinyidp.admin.pageData()` module;
+  - no filesystem, database, process, or HTTP modules;
+  - a 250 ms deadline;
+  - 1 MiB encoded-output, 2,000-node, 64-level, and 32 KiB string limits.
+- Added the public handler and mounted:
+  - `GET /admin` and `/admin/...`;
+  - `/admin/auth/...`;
+  - `/api/admin/...`;
+  - `/api/widget/...`;
+  - `/static/admin/...`.
+- Left the action execution endpoint explicitly closed with
+  `501 mutations_not_enabled` until Phase C supplies the complete guarded
+  mutation path.
+- Added restrictive CSP, referrer, MIME-sniffing, frame, and permissions
+  headers.
+- Added a TypeScript React frontend with Redux Toolkit, RTK Query, Bootstrap,
+  the rag-evaluation Widget renderer, accessible navigation, skip navigation,
+  loading/error states, and the seven read-only navigation destinations.
+- Added deterministic Vite output names, committed build artifacts, fixed
+  `go:embed` assets, `go generate` directives, Make targets, and a CI gate that
+  rebuilds the assets and rejects a diff.
+- Added `--admin-auth-key-file`. It accepts an owner-only regular file
+  containing exactly 32 bytes, distinct from the OIDC token secret.
+- Wired production startup to:
+  - derive the public origin from the canonical HTTPS issuer;
+  - perform OIDC discovery through `NewInProcessIssuerTransport`;
+  - reconstruct the user projection;
+  - construct the authorizer, page service, Widget runtime, and admin handler;
+  - mount admin routes before the provider's catch-all handler.
+
+### Why
+
+- The console must use the same production trust boundary as the provider,
+  without creating a second public listener or trusting forwarded data twice.
+- OIDC discovery cannot call the not-yet-listening public socket during
+  startup. The repository's fail-closed in-process issuer transport provides
+  the same discovery and key material through the actual provider handler.
+- Read authorization belongs immediately before each query. A valid session
+  alone is not proof that its backing grant remains active or still contains a
+  page capability.
+- Widget source is server-owned presentation logic, not an alternate backend.
+  Supplying pre-authorized data to a two-module VM preserves that separation.
+- Committing the generated assets keeps ordinary Go builds self-contained;
+  rebuilding and diffing them in CI detects stale artifacts.
+
+### What worked
+
+- `pnpm --dir internal/adminweb/frontend run check` passed TypeScript checking
+  and produced:
+
+  ```text
+  ../frontend_dist/index.html          0.54 kB
+  ../frontend_dist/assets/admin.css  323.82 kB
+  ../frontend_dist/assets/admin.js   435.42 kB
+  ```
+
+- Focused Go verification passed:
+
+  ```text
+  go test ./internal/adminweb ./internal/cmds ./internal/sections/production \
+    ./pkg/idpadminapp ./pkg/sqlitestore
+  ```
+
+- `go test ./... -count=1` passed.
+- `make lint` passed the pinned golangci-lint suite, Glazed analyzer, and
+  IDP UI analyzer.
+- Handler tests prove the admin prefixes win before the OIDC provider
+  fallback, unknown embedded assets return 404, API requests require a
+  session, and security headers cover both SPA and asset responses.
+- Widget tests prove unavailable modules remain unavailable, execution is
+  interrupted at the deadline, and oversized/deep output is rejected.
+
+### What didn't work
+
+- The first Widget program used a fluent convenience method that the installed
+  DSL version does not expose:
+
+  ```text
+  TypeError: Object has no member 'compact' at <eval>:37:74(4)
+  ```
+
+  The program now uses the supported `table((table) => table)` builder form.
+
+- The first TypeScript check assumed the package exported `WidgetPage` and
+  that side-effect CSS imports needed no ambient declarations:
+
+  ```text
+  src/api.ts(2,15): error TS2724: '"@go-go-golems/rag-evaluation-site"' has no exported member named 'WidgetPage'. Did you mean 'useWidgetPage'?
+  src/main.tsx(4,8): error TS2882: Cannot find module or type declarations for side-effect import of 'bootstrap/dist/css/bootstrap.min.css'.
+  src/main.tsx(5,8): error TS2882: Cannot find module or type declarations for side-effect import of '@go-go-golems/rag-evaluation-site/styles.css'.
+  src/main.tsx(6,8): error TS2882: Cannot find module or type declarations for side-effect import of '@go-go-golems/rag-evaluation-site/styles/theme.css'.
+  src/main.tsx(7,8): error TS2882: Cannot find module or type declarations for side-effect import of './styles.css'.
+  ```
+
+  The API now uses the package's actual `WidgetPageResponse` export and
+  `vite-env.d.ts` declares CSS modules.
+
+- The first focused Go test in the restricted workspace could not read the
+  default build cache:
+
+  ```text
+  open /home/manuel/.cache/go-build/...-d: read-only file system
+  ```
+
+  The same tests passed when executed with the already-approved Go test
+  capability.
+
+- The first staging attempt reached the linked worktree's Git metadata outside
+  the writable workspace:
+
+  ```text
+  fatal: Unable to create '/home/manuel/code/wesen/go-go-golems/tiny-idp/.git/worktrees/tiny-idp/index.lock': Read-only file system
+  ```
+
+  Staging was repeated with the approved Git capability; no repository file
+  contents were changed by the failed attempt.
+
+- The first successful staging command added the whole new frontend directory
+  before that directory had a scoped ignore file. The staged-stat review
+  immediately exposed thousands of pnpm dependency files and CRLF/trailing
+  whitespace warnings under `frontend/node_modules`. Those dependency files
+  were removed from the index without deleting the local installation, and
+  `frontend/.gitignore` now excludes `node_modules/`.
+
+### What I learned
+
+- `@go-go-golems/rag-evaluation-site` exports response types separately from
+  its hooks; the server's JSON contract should follow `WidgetPageResponse`.
+- Fixed Vite output names make a small Go embed boundary possible without a
+  generated asset manifest.
+- The admin session cookie needs path `/`, not `/admin`, because the UI and API
+  live under different top-level prefixes. The cookie remains host-only,
+  HttpOnly, Secure, SameSite=Lax, random, and stored only as a keyed hash.
+- The owner bootstrap client can remain outside the reviewed production client
+  catalog: owner bootstrap provisions the dedicated public client, and normal
+  production bootstrap validates the configured catalog without deleting it.
+
+### What was tricky to build
+
+- The production mux has a provider catch-all, so every admin prefix must be
+  registered on the outer mux before `/`.
+- The issuer may have a path while the console remains origin-level. OIDC
+  endpoints derive from the complete issuer, but the callback derives from
+  only its scheme and host.
+- SQLite invitation records use serialized blobs. Invitation metadata must be
+  loaded before scanning dependent values to avoid nested reads on the same
+  constrained connection.
+- Goja interruption needs a goroutine that stops when normal evaluation ends;
+  otherwise a late timeout can interrupt a reused VM. Creating a new VM per
+  request both closes that race and prevents cross-request state.
+
+### What warrants a second pair of eyes
+
+- Review the deliberately separate token and admin-session secrets and their
+  deployment provisioning.
+- Review the CSP before adding any third-party asset or browser-test harness.
+- Review the generic read-only page shape before Phase C introduces action
+  descriptors.
+- Review whether production startup should report projection drift separately
+  before rebuilding it automatically.
+
+### What should be done in the future
+
+- Phase C must replace the closed action endpoint only after signed handle,
+  fresh-auth, CSRF, typed-confirmation, expected-version, nonce, and
+  idempotency checks can execute as one guarded workflow.
+- Maintenance must expire admin auth attempts and sessions.
+- Phase F must add real browser, responsive, keyboard, and accessibility
+  evidence.
+
+### Code review instructions
+
+- Start at `internal/cmds/serve_production.go` where the console is assembled.
+- Follow a page request through `internal/adminweb/handler.go`,
+  `pkg/idpadminapp/page_data.go`, and `pkg/sqlitestore/admin_queries.go`.
+- Review the module allowlist and bounds in
+  `internal/adminweb/widget_runtime.go`.
+- Inspect `internal/adminweb/frontend/src/api.ts` and `App.tsx`, then compare
+  them with the response shape emitted by `verbs/pages.js`.
+- Rebuild with `make frontend-check`, then run `git diff --exit-code --
+  internal/adminweb/frontend_dist`.
+
+### Technical details
+
+```text
+browser GET /api/widget/pages/users
+  -> H(session cookie) lookup
+  -> reload active owner grant and exact version
+  -> authorize users.read
+  -> bounded parameterized SQLite query
+  -> safe generic page data
+  -> fresh Goja VM
+       require("tinyidp.admin").pageData()
+       require("widget.dsl")
+       build Widget IR
+  -> validate size, depth, node count, and strings
+  -> WidgetPageResponse JSON
+  -> React WidgetRenderer
+```

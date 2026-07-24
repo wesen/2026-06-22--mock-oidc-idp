@@ -11,14 +11,39 @@ Topics:
 DocType: index
 Intent: long-term
 Owners: []
-RelatedFiles: []
+RelatedFiles:
+    - Path: repo://.github/workflows/ci.yml
+      Note: Frontend build and committed-asset reproducibility gate
+    - Path: repo://internal/adminweb/assets.go
+      Note: Fixed embedded production SPA and asset handlers
+    - Path: repo://internal/adminweb/auth.go
+      Note: OIDC PKCE, admin-session, grant revalidation, and CSRF boundary
+    - Path: repo://internal/adminweb/frontend/src/App.tsx
+      Note: React administration shell and read-only navigation
+    - Path: repo://internal/adminweb/frontend/src/api.ts
+      Note: RTK Query session and Widget page API contracts
+    - Path: repo://internal/adminweb/handler.go
+      Note: Public admin route surface and response security headers
+    - Path: repo://internal/adminweb/verbs/pages.js
+      Note: Server-owned Widget DSL page definitions
+    - Path: repo://internal/adminweb/widget_runtime.go
+      Note: Constrained widget.dsl and tinyidp.admin Goja runtime
+    - Path: repo://internal/cmds/serve_production.go
+      Note: Production console construction and public listener integration
+    - Path: repo://internal/sections/production/section.go
+      Note: Owner-only admin authentication key configuration
+    - Path: repo://pkg/idpadminapp/page_data.go
+      Note: Capability-authorized read-only page orchestration
+    - Path: repo://pkg/sqlitestore/admin_queries.go
+      Note: Bounded parameterized administration read models
 ExternalSources:
     - local:tiny-idp-ux.md
-Summary: "Design a production system-scoped administration control plane and widget.dsl v3 console for TinyIDP."
+Summary: Design a production system-scoped administration control plane and widget.dsl v3 console for TinyIDP.
 LastUpdated: 2026-07-23T20:15:16.705417445-04:00
-WhatFor: "Coordinate implementation of TinyIDP's first production administration control plane and Widget DSL console."
-WhenToUse: "Use as the landing page for architecture review, implementation planning, and phased delivery."
+WhatFor: Coordinate implementation of TinyIDP's first production administration control plane and Widget DSL console.
+WhenToUse: Use as the landing page for architecture review, implementation planning, and phased delivery.
 ---
+
 
 
 # Design the TinyIDP administration backend and widget-DSL console MVP

@@ -388,6 +388,7 @@ func (m *AuthManager) principal(request *http.Request) (idpadmin.AdminPrincipal,
 	return idpadmin.AdminPrincipal{
 		Subject: session.Subject, SessionID: cookie.Value,
 		Authenticated: session.AuthenticatedAt, Assurance: assurance,
+		GrantID: session.GrantID, GrantVersion: session.GrantVersion,
 	}, session, nil
 }
 

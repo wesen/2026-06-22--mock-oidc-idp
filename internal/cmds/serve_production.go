@@ -23,6 +23,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/go-go-golems/tiny-idp/internal/adminweb"
 	"github.com/go-go-golems/tiny-idp/internal/observability"
 	"github.com/go-go-golems/tiny-idp/internal/pluginapi"
 	"github.com/go-go-golems/tiny-idp/internal/pluginhost"
@@ -33,6 +34,8 @@ import (
 	"github.com/go-go-golems/tiny-idp/pkg/embeddedidp"
 	"github.com/go-go-golems/tiny-idp/pkg/idp"
 	"github.com/go-go-golems/tiny-idp/pkg/idpaccounts"
+	"github.com/go-go-golems/tiny-idp/pkg/idpadmin"
+	"github.com/go-go-golems/tiny-idp/pkg/idpadminapp"
 	"github.com/go-go-golems/tiny-idp/pkg/idpemailchallenge"
 	"github.com/go-go-golems/tiny-idp/pkg/idpemailchallenge/smtpmailer"
 	"github.com/go-go-golems/tiny-idp/pkg/idpinvite"
@@ -86,6 +89,7 @@ Example:
   tinyidp serve-production --addr :8443 --issuer https://idp.example.test \
     --db /var/lib/tinyidp/idp.db --audit-path /var/log/tinyidp/audit.jsonl \
     --token-secret-file /run/secrets/tinyidp-token \
+    --admin-auth-key-file /run/secrets/tinyidp-admin-auth \
     --clients-file /etc/tinyidp/catalog/clients.json \
     --theme-dir /etc/tinyidp/themes \
     --theme-catalog-file /etc/tinyidp/themes/themes.json \
@@ -138,6 +142,14 @@ func runProductionHost(ctx context.Context, settings *productionsection.Settings
 		return err
 	}
 	defer clearProductionSecret(secret)
+	adminAuthKey, err := readOwnerOnlyFile(settings.AdminAuthKeyFile, "admin auth key", 32)
+	if err != nil {
+		return err
+	}
+	defer clearProductionSecret(adminAuthKey)
+	if len(adminAuthKey) != 32 {
+		return fmt.Errorf("admin auth key file must contain exactly 32 bytes")
+	}
 	signupSource, err := readProductionSignupProgram(settings.SignupProgramFile)
 	if err != nil {
 		return err
@@ -273,6 +285,89 @@ func runProductionHost(ctx context.Context, settings *productionsection.Settings
 		_ = store.Close()
 		return err
 	}
+	publicOrigin, err := issuerOrigin(settings.Issuer)
+	if err != nil {
+		_ = provider.Close(context.Background())
+		_ = signupManager.Close(context.Background())
+		_ = audit.Close()
+		_ = store.Close()
+		return err
+	}
+	issuerTransport, err := embeddedidp.NewInProcessIssuerTransport(settings.Issuer, provider.Handler(), embeddedidp.InProcessTransportOptions{})
+	if err != nil {
+		_ = provider.Close(context.Background())
+		_ = signupManager.Close(context.Background())
+		_ = audit.Close()
+		_ = store.Close()
+		return fmt.Errorf("construct admin issuer transport: %w", err)
+	}
+	oauthFlow, identityVerifier, err := adminweb.NewOIDCFlow(
+		ctx,
+		settings.Issuer,
+		publicOrigin+"/admin/auth/callback",
+		&http.Client{Transport: issuerTransport},
+	)
+	if err != nil {
+		_ = provider.Close(context.Background())
+		_ = signupManager.Close(context.Background())
+		_ = audit.Close()
+		_ = store.Close()
+		return err
+	}
+	adminAuth, err := adminweb.NewAuthManager(adminweb.AuthConfig{
+		Store: store, OAuth: oauthFlow, Verifier: identityVerifier,
+		SecretKey: adminAuthKey, PublicOrigin: publicOrigin, Secure: true,
+	})
+	clearProductionSecret(adminAuthKey)
+	if err != nil {
+		_ = provider.Close(context.Background())
+		_ = signupManager.Close(context.Background())
+		_ = audit.Close()
+		_ = store.Close()
+		return err
+	}
+	if _, err := store.RebuildAdminUserProjection(ctx, time.Now().UTC()); err != nil {
+		_ = provider.Close(context.Background())
+		_ = signupManager.Close(context.Background())
+		_ = audit.Close()
+		_ = store.Close()
+		return fmt.Errorf("rebuild admin user projection: %w", err)
+	}
+	adminAuthorizer, err := idpadmin.NewAuthorizer(store, 5*time.Minute, time.Now)
+	if err != nil {
+		_ = provider.Close(context.Background())
+		_ = signupManager.Close(context.Background())
+		_ = audit.Close()
+		_ = store.Close()
+		return err
+	}
+	adminPages, err := idpadminapp.NewPageDataService(store, adminAuthorizer, time.Now)
+	if err != nil {
+		_ = provider.Close(context.Background())
+		_ = signupManager.Close(context.Background())
+		_ = audit.Close()
+		_ = store.Close()
+		return err
+	}
+	adminWidgets, err := adminweb.NewWidgetRuntime()
+	if err != nil {
+		_ = provider.Close(context.Background())
+		_ = signupManager.Close(context.Background())
+		_ = audit.Close()
+		_ = store.Close()
+		return err
+	}
+	publicAdminHandler, err := adminweb.NewHandler(adminweb.HandlerConfig{
+		Auth: adminAuth, Pages: adminPages, Widgets: adminWidgets,
+		SPA: adminweb.SPAHandler(), Assets: adminweb.AssetsHandler(),
+	})
+	if err != nil {
+		_ = provider.Close(context.Background())
+		_ = signupManager.Close(context.Background())
+		_ = audit.Close()
+		_ = store.Close()
+		return err
+	}
 	telemetry, err := observability.NewMetrics()
 	if err != nil {
 		_ = provider.Close(context.Background())
@@ -314,7 +409,7 @@ func runProductionHost(ctx context.Context, settings *productionsection.Settings
 		return err
 	}
 	readyPath := strings.TrimSuffix(issuerURL.Path, "/") + "/readyz"
-	handler, err := productionHTTPHandler(provider.Handler(), themeCatalog.AssetsHandler(), runtimes, readyPath, func(readinessCtx context.Context) idp.ReadinessReport {
+	handler, err := productionHTTPHandler(provider.Handler(), themeCatalog.AssetsHandler(), publicAdminHandler, runtimes, readyPath, func(readinessCtx context.Context) idp.ReadinessReport {
 		return pluginhost.CombineReadiness(provider.Readiness(readinessCtx), pluginhost.Readiness(readinessCtx, runtimes))
 	}, settings.MaxRequestBytes)
 	if err != nil {
@@ -326,23 +421,14 @@ func runProductionHost(ctx context.Context, settings *productionsection.Settings
 		return err
 	}
 	if listenerMode == productionListenerTrustedProxyHTTP {
-		publicOrigin, originErr := issuerOrigin(settings.Issuer)
-		if originErr != nil {
+		handler, err = idp.NewTrustedProxyHTTPHandler(idp.TrustedProxyHTTPConfig{PublicOrigin: publicOrigin, Resolver: proxyResolver}, handler)
+		if err != nil {
 			_ = pluginhost.Close(context.Background(), runtimes)
 			_ = provider.Close(context.Background())
 			_ = signupManager.Close(context.Background())
 			_ = audit.Close()
 			_ = store.Close()
-			return originErr
-		}
-		handler, originErr = idp.NewTrustedProxyHTTPHandler(idp.TrustedProxyHTTPConfig{PublicOrigin: publicOrigin, Resolver: proxyResolver}, handler)
-		if originErr != nil {
-			_ = pluginhost.Close(context.Background(), runtimes)
-			_ = provider.Close(context.Background())
-			_ = signupManager.Close(context.Background())
-			_ = audit.Close()
-			_ = store.Close()
-			return originErr
+			return err
 		}
 	}
 	httpServer := &http.Server{
@@ -425,9 +511,16 @@ func runProductionHost(ctx context.Context, settings *productionsection.Settings
 // productionHTTPHandler keeps reviewed interaction assets on the provider's
 // own origin. Every OAuth/OIDC and form route remains owned by the embedded
 // provider handler.
-func productionHTTPHandler(providerHandler, assetsHandler http.Handler, runtimes []pluginapi.Runtime, readyPath string, readiness func(context.Context) idp.ReadinessReport, maxRequestBytes int) (http.Handler, error) {
+func productionHTTPHandler(providerHandler, assetsHandler, adminHandler http.Handler, runtimes []pluginapi.Runtime, readyPath string, readiness func(context.Context) idp.ReadinessReport, maxRequestBytes int) (http.Handler, error) {
 	mux := http.NewServeMux()
 	mux.Handle("/static/themes/", assetsHandler)
+	if adminHandler != nil {
+		mux.Handle("/admin", adminHandler)
+		mux.Handle("/admin/", adminHandler)
+		mux.Handle("/api/admin/", adminHandler)
+		mux.Handle("/api/widget/", adminHandler)
+		mux.Handle("/static/admin/", adminHandler)
+	}
 	if err := pluginhost.Mount(mux, runtimes); err != nil {
 		return nil, err
 	}

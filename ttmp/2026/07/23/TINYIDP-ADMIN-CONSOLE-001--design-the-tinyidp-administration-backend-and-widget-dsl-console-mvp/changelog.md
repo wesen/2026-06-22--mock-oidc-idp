@@ -7,6 +7,7 @@
 - Added focused tests for authorization, handle integrity/binding/expiry, grant lifecycle, replay prevention, CAS, and cross-domain rollback.
 - Completed Phase A with typed safe query/command contracts, a separate application orchestration layer, Glazed owner lifecycle commands, deterministic user-projection rebuild/drift checks, and an atomic mutation executor.
 - Started Phase B with the required Widget DSL dependency and a tested OIDC PKCE/admin-session authentication boundary.
+- Completed Phase B with typed read models, a constrained Widget DSL runtime, public admin routing, in-process OIDC discovery, exact-key session configuration, embedded React/Redux/RTK Query/Bootstrap assets, and frontend CI reproducibility checks.
 
 ## 2026-07-23
 
