@@ -32,6 +32,7 @@ COMMAND_NAMES = (
     "state-status",
     "state-reset",
 )
+BUILTIN_SECURITY_COMMANDS = {"secrets-fetch", "pki-backup", "pki-restore"}
 
 
 def emit(value: dict[str, Any]) -> None:
@@ -237,7 +238,17 @@ def handle_dynamic_command(
         fail(request_id, "E_INVALID_ARGUMENT", "command argv must be a list of strings")
         return
     command = manifest.commands.get(name)
-    if command is None:
+    if name in BUILTIN_SECURITY_COMMANDS:
+        command = [
+            "python3",
+            "devctl/operations.py",
+            "--repo-root",
+            str(request_root(ctx)),
+            "--manifest",
+            manifest_selector(input_obj),
+            name,
+        ]
+    elif command is None:
         fail(request_id, "E_UNAVAILABLE", f"{name} is not available for profile {manifest.name}")
         return
     exit_code = run_command(

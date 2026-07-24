@@ -10,6 +10,7 @@ vault:
   runtime_path: tiny-idp/dev/admin-console/runtime
   bootstrap_path: tiny-idp/dev/admin-console/bootstrap
   pki_path: tiny-idp/dev/_shared/caddy-local/pki-storage
+  caddyfile: examples/tinyidp-admin-console/Caddyfile
 required_tools: [docker, vault, jq, base64]
 required_paths:
   - examples/tinyidp-admin-console/compose.yaml
@@ -20,8 +21,16 @@ runtime:
       cwd: examples/tinyidp-admin-console
       command: [docker, compose, up, --build, --remove-orphans]
 prepare: {}
+secret_material:
+  target: examples/tinyidp-admin-console/runtime/secrets
+  files:
+    - {source: runtime, field: token_secret_b64, path: token.key, encoding: base64, minimum_bytes: 32}
+    - {source: runtime, field: admin_auth_key_b64, path: admin-auth.key, encoding: base64, exact_bytes: 32}
+    - {source: runtime, field: admin_action_key_b64, path: admin-action.key, encoding: base64, minimum_bytes: 32}
+    - {source: runtime, field: invitation_lookup_key_b64, path: invitation-lookup.key, encoding: base64, exact_bytes: 32}
+    - {source: runtime, field: email_challenge_key_b64, path: email-challenge.key, encoding: base64, exact_bytes: 32}
+    - {source: bootstrap, field: owner_password, path: owner-password.txt, encoding: text, minimum_bytes: 16}
 commands:
-  secrets-fetch: [examples/tinyidp-admin-console/scripts/00-fetch-vault-secrets.sh]
   pki-export-root: [examples/tinyidp-admin-console/scripts/02-export-browser-ca.sh]
   smoke: [examples/tinyidp-admin-console/scripts/03-smoke.sh]
   state-status: [docker, compose, -f, examples/tinyidp-admin-console/compose.yaml, ps, -a]

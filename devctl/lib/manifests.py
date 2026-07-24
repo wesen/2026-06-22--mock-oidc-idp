@@ -63,6 +63,16 @@ class Service:
 
 
 @dataclass(frozen=True)
+class SecretFile:
+    source: str
+    field: str
+    path: str
+    encoding: str
+    exact_bytes: int | None
+    minimum_bytes: int | None
+
+
+@dataclass(frozen=True)
 class EnvironmentManifest:
     path: Path
     name: str
@@ -76,6 +86,8 @@ class EnvironmentManifest:
     services: list[Service]
     prepare: dict[str, list[str]]
     commands: dict[str, list[str]]
+    secret_target: str | None
+    secret_files: list[SecretFile]
 
 
 def load_manifest(repo_root: Path, manifest_path: str) -> EnvironmentManifest:
@@ -140,6 +152,41 @@ def load_manifest(repo_root: Path, manifest_path: str) -> EnvironmentManifest:
     commands_doc = _mapping(doc.get("commands", {}), "commands")
     commands = {str(name): _command(command, f"commands.{name}") for name, command in commands_doc.items()}
 
+    secret_doc = _mapping(doc.get("secret_material", {}), "secret_material")
+    secret_target_value = secret_doc.get("target")
+    secret_target = None if secret_target_value is None else _string(secret_target_value, "secret_material.target")
+    if secret_target is not None:
+        _resolve_inside(root, secret_target, "secret_material.target")
+    secret_files: list[SecretFile] = []
+    secret_file_docs = secret_doc.get("files", [])
+    if not isinstance(secret_file_docs, list):
+        raise ManifestError("secret_material.files must be a list")
+    for index, value in enumerate(secret_file_docs):
+        file_doc = _mapping(value, f"secret_material.files[{index}]")
+        source = _string(file_doc.get("source"), f"secret_material.files[{index}].source")
+        field = _string(file_doc.get("field"), f"secret_material.files[{index}].field")
+        file_path = _string(file_doc.get("path"), f"secret_material.files[{index}].path")
+        if Path(file_path).is_absolute() or ".." in Path(file_path).parts:
+            raise ManifestError(f"secret_material.files[{index}].path must be a confined relative path")
+        encoding = _string(file_doc.get("encoding", "text"), f"secret_material.files[{index}].encoding")
+        if encoding not in {"base64", "text"}:
+            raise ManifestError(f"secret_material.files[{index}].encoding must be base64 or text")
+        exact_value = file_doc.get("exact_bytes")
+        minimum_value = file_doc.get("minimum_bytes")
+        exact = None if exact_value is None else int(exact_value)
+        minimum = None if minimum_value is None else int(minimum_value)
+        if exact is not None and exact <= 0:
+            raise ManifestError(f"secret_material.files[{index}].exact_bytes must be positive")
+        if minimum is not None and minimum <= 0:
+            raise ManifestError(f"secret_material.files[{index}].minimum_bytes must be positive")
+        if exact is not None and minimum is not None:
+            raise ManifestError(f"secret_material.files[{index}] cannot set exact_bytes and minimum_bytes")
+        secret_files.append(SecretFile(source, field, file_path, encoding, exact, minimum))
+    if secret_files and secret_target is None:
+        raise ManifestError("secret_material.target is required when files are declared")
+    if len({item.path for item in secret_files}) != len(secret_files):
+        raise ManifestError("secret material output paths must be unique")
+
     if classification == "production-shaped-local":
         if not issuer or not issuer.startswith("https://"):
             raise ManifestError("production-shaped-local manifests require an HTTPS issuer")
@@ -160,4 +207,6 @@ def load_manifest(repo_root: Path, manifest_path: str) -> EnvironmentManifest:
         services=services,
         prepare=prepare,
         commands=commands,
+        secret_target=secret_target,
+        secret_files=secret_files,
     )

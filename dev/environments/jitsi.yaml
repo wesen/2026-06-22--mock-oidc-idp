@@ -10,6 +10,8 @@ vault:
   runtime_path: tiny-idp/dev/jitsi/runtime
   bootstrap_path: tiny-idp/dev/jitsi/bootstrap
   pki_path: tiny-idp/dev/_shared/caddy-local/pki-storage
+  caddyfile: examples/tinyidp-jitsi/Caddyfile
+  integration_path: tiny-idp/dev/jitsi/integrations/jitsi
 required_tools: [docker, vault, jq, base64]
 required_paths:
   - examples/tinyidp-jitsi/compose.yaml
@@ -21,8 +23,17 @@ runtime:
       cwd: examples/tinyidp-jitsi
       command: [docker, compose, up, --build, --remove-orphans]
 prepare: {}
+secret_material:
+  target: examples/tinyidp-jitsi/runtime/secrets
+  files:
+    - {source: runtime, field: token_secret_b64, path: token.key, encoding: base64, minimum_bytes: 32}
+    - {source: runtime, field: admin_auth_key_b64, path: admin-auth.key, encoding: base64, exact_bytes: 32}
+    - {source: runtime, field: admin_action_key_b64, path: admin-action.key, encoding: base64, minimum_bytes: 32}
+    - {source: runtime, field: invitation_lookup_key_b64, path: invitation-lookup.key, encoding: base64, exact_bytes: 32}
+    - {source: runtime, field: email_challenge_key_b64, path: email-challenge.key, encoding: base64, exact_bytes: 32}
+    - {source: bootstrap, field: owner_password, path: owner-password.txt, encoding: text, minimum_bytes: 16}
+    - {source: integration, field: shared_secret_b64, path: jitsi-shared-secret.key, encoding: base64, minimum_bytes: 32}
 commands:
-  seed: [examples/tinyidp-jitsi/scripts/00-init-secrets.sh]
   pki-export-root: [examples/tinyidp-jitsi/scripts/01-export-browser-ca.sh]
   smoke: [examples/tinyidp-jitsi/scripts/02-smoke.sh]
   browser-test: [examples/tinyidp-jitsi/scripts/03-browser-tests.sh]

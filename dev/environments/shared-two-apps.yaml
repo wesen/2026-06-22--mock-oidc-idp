@@ -10,6 +10,7 @@ vault:
   runtime_path: tiny-idp/dev/shared-two-apps/runtime
   bootstrap_path: tiny-idp/dev/shared-two-apps/bootstrap
   pki_path: tiny-idp/dev/_shared/caddy-local/pki-storage
+  caddyfile: examples/tinyidp-shared-two-apps/Caddyfile
 required_tools: [docker, vault, jq, base64]
 required_paths:
   - examples/tinyidp-shared-two-apps/compose.yaml
@@ -21,8 +22,16 @@ runtime:
       cwd: examples/tinyidp-shared-two-apps
       command: [docker, compose, up, --build, --remove-orphans]
 prepare: {}
+secret_material:
+  target: examples/tinyidp-shared-two-apps/runtime/secrets
+  files:
+    - {source: runtime, field: token_secret_b64, path: token.key, encoding: base64, minimum_bytes: 32}
+    - {source: runtime, field: admin_auth_key_b64, path: admin-auth.key, encoding: base64, exact_bytes: 32}
+    - {source: runtime, field: admin_action_key_b64, path: admin-action.key, encoding: base64, minimum_bytes: 32}
+    - {source: runtime, field: invitation_lookup_key_b64, path: invitation-lookup.key, encoding: base64, exact_bytes: 32}
+    - {source: runtime, field: email_challenge_key_b64, path: email-challenge.key, encoding: base64, exact_bytes: 32}
+    - {source: bootstrap, field: owner_password, path: owner-password.txt, encoding: text, minimum_bytes: 16}
 commands:
-  seed: [examples/tinyidp-shared-two-apps/scripts/00-init-secrets.sh]
   pki-export-root: [examples/tinyidp-shared-two-apps/scripts/01-export-browser-ca.sh]
   smoke: [examples/tinyidp-shared-two-apps/scripts/02-smoke.sh]
   browser-test: [python3, examples/tinyidp-shared-two-apps/scripts/03-browser-acceptance.py]
