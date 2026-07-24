@@ -54,3 +54,11 @@ Opened the completed implementation guide with md-view and uploaded the implemen
 ### Related Files
 
 - /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/ttmp/2026/07/23/TINYIDP-ADMIN-CONSOLE-001--design-the-tinyidp-administration-backend-and-widget-dsl-console-mvp/reference/01-investigation-diary.md — Final local-render and reMarkable delivery evidence
+
+## 2026-07-24
+
+Added the Vault-backed local TLS and secret provisioning design, including trust boundaries, KV schema, materialization contract, rotation matrix, phased implementation plan, and next-session tasks.
+
+## 2026-07-24
+
+Added the unified TinyIDP development and demo environment platform design. It inventories existing examples and specifies manifest-driven devctl profiles, consistent dev/production Vault paths, versioned Caddy private-CA storage backup and guarded restore, shared Compose patterns, an example migration program, a Glazed local-app tutorial, and an acceptance matrix. Superseded the earlier no-CA-backup decision in design document 02.
