@@ -1657,6 +1657,37 @@ The MVP is complete only when:
 16. `go test ./...`, `go build ./...`, generation, lint, frontend typecheck/build, browser security tests, and Widget IR contract tests pass.
 17. Adding identity domains later requires new data and capability-visible navigation, not replacement of MVP contracts.
 
+### 17.1 Implemented MVP acceptance evidence
+
+The MVP was implemented on `feat/tinyidp-admin-console`. The following table is
+the release audit for the definition above; it maps each product requirement to
+current source and executable evidence rather than relying on implementation
+intent.
+
+| # | Status | Authoritative implementation and verification evidence |
+|---:|:---:|---|
+| 1 | Met | `pkg/idpadminapp/owner.go` fixes the public client identity and redirect contract; `internal/adminweb/auth.go` performs authorization-code PKCE and identity verification; `internal/adminweb/auth_test.go` exercises login, callback, nonce, session creation, and grant invalidation. |
+| 2 | Met | `internal/cmds/admin_console.go` exposes bootstrap/status/revoke as Glazed CLI commands and emits durable audit events; `internal/cmds/admin_console_test.go` proves lifecycle behavior and atomic first-owner provisioning. No browser action definition grants owner administration. |
+| 3 | Met | `internal/adminweb/auth.go` uses the dedicated `tinyidp_admin_session` cookie and exact admin path/configuration, separate from protocol browser-session configuration; `internal/adminweb/auth_test.go` checks its flags and lifecycle. |
+| 4 | Met | `pkg/idpadmin/model.go`, `contracts.go`, and `action_handle.go` carry `AdminScope` through principals, grants, every query/command contract, and signed claims. `ValidateMVP` accepts only `SystemScope`; model and application tests reject unsupported or mismatched scope. |
+| 5 | Met | `pkg/idpadminapp/executor.go` verifies the signed handle and current principal/grant/capability/scope/assurance, consumes the session-bound nonce, compares resource version, enforces idempotency, and executes inside one transaction. `executor_test.go`, `user_commands_test.go`, and HTTP tests cover tampering, replay, stale versions, fresh auth, CSRF, and Origin. |
+| 6 | Met | `pkg/idpadminapp/user_commands.go` implements create/update/enable/disable/unlock/set-password/revoke-access, while `page_data.go` and SQLite projections implement list/search/detail. `user_commands_test.go` exercises the complete lifecycle and revocation invariants. |
+| 7 | Met | `pkg/idpadminapp/invitation_commands.go` and the public-ID lookup migration implement issue/list/revoke and one-time reveal. `invitation_client_commands_test.go` proves issuance, public-ID revocation, and replay-safe secret behavior. |
+| 8 | Met | `pkg/idpadminapp/client_commands.go` implements create/detail/update/enable/disable/rotate-secret with safe DTOs. Its lifecycle, validation, hash replacement, and one-time secret semantics are covered by `invitation_client_commands_test.go` and `pkg/idpadmin/contracts_test.go`. |
+| 9 | Met | `pkg/idpadminapp/key_commands.go` implements guarded rotate/eligible-retire and returns public key metadata only. Tests prove verification overlap, fresh auth, and absence of private material. `operation_commands_test.go` proves `keys.purge` is absent from the browser registry. |
+| 10 | Met | `operation_commands.go`, `operation_worker.go`, `downloads.go`, and `outbox_worker.go` implement doctor, bounded readiness health, managed backup create/verify, diagnostics, audit delivery, and one-use downloads. Operation tests prove root confinement, symlink rejection, redaction, and single consumption. |
+| 11 | Met | `idpadmin.ActivityRow`, `idpadminstore.ActionRecord`, migration 016, `executor.go`, and `sqlitestore/admin_queries.go` persist and expose actor, command, target, scope, reason, result, assurance, before/after versions, and request ID. Executor and query tests inspect the resulting evidence. |
+| 12 | Met | `sqlitestore.Update` supplies both protocol and admin transaction stores to the executor; the mutation, action, idempotency receipt, version, and outbox row are written before one commit. `executor_test.go` proves successful atomic commit and complete rollback on injected failure. |
+| 13 | Met | `internal/adminweb/verbs/pages.js` copies a fixed safe display field set. `widget_runtime.go` has a closed module/component/schema/content validator and rejects authority, SQL, external URLs, code, hashes, passwords, and private keys. Go contract tests and the browser suite cover serialization through `defaultWidgetRegistry`; one-time secrets are immediately evicted from RTK Query caches. |
+| 14 | Met | `internal/adminweb/frontend/tests/admin-console.spec.ts` renders all seven screens under all eight required states (56 combinations), then separately exercises expired auth, forbidden responses, version conflict, audit degradation, and safe operation failure. |
+| 15 | Met | The same Playwright suite checks landmarks, first-focus behavior, Axe, reduced motion, tablet rendering, and the below-480-pixel read-only emergency mode. The committed tablet baseline is `tests/admin-console.spec.ts-snapshots/operations-tablet-linux.png`. |
+| 16 | Met | On 2026-07-24 the exact gates passed: `go generate ./...`; `go fmt ./...`; `go test ./... -count=1`; `go build ./...`; `make lint`; `pnpm run check`; and `pnpm exec playwright test` (6 passed). Widget contract tests pass in `internal/adminweb`; the 10,000-user benchmark measured 112,868 ns/op at 20 iterations. |
+| 17 | Met | `AdminScope` already has distinct system/domain shapes while `ValidateMVP` deliberately rejects domain scope today. Queries and commands receive scope explicitly, capabilities are a closed registry, and navigation is page/capability driven. Adding domains therefore extends data, grants, and visible navigation without replacing system-scope contracts. |
+
+The full chronological command output, failed assumptions, browser debugging,
+benchmark result, review advice, and commit boundaries are preserved in
+`reference/01-investigation-diary.md`.
+
 ## 18. File and API reference map
 
 ### TinyIDP current code

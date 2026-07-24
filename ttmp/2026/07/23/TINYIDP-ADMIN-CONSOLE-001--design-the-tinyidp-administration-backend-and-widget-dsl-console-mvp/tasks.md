@@ -43,9 +43,9 @@
 
 ## Phase F — Hardening and release
 
-- [ ] Add accessibility, keyboard, responsive, failure-state, security, and visual tests.
-- [ ] Add Widget IR deterministic validators and 10,000-user query benchmarks.
-- [ ] Pass generation, formatting, tests, builds, lint, frontend checks, and browser tests.
+- [x] Add accessibility, keyboard, responsive, failure-state, security, and visual tests.
+- [x] Add Widget IR deterministic validators and 10,000-user query benchmarks.
+- [x] Pass generation, formatting, tests, builds, lint, frontend checks, and browser tests.
 
 ## Documentation delivery
 

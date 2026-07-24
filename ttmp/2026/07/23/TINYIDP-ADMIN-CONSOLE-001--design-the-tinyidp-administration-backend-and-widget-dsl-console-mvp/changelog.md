@@ -36,3 +36,13 @@ Validated the ticket, completed the bundle dry-run, and uploaded TINYIDP ADMIN C
 
 - /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/ttmp/2026/07/23/TINYIDP-ADMIN-CONSOLE-001--design-the-tinyidp-administration-backend-and-widget-dsl-console-mvp/reference/01-investigation-diary.md — Validation and delivery evidence
 - /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/ttmp/2026/07/23/TINYIDP-ADMIN-CONSOLE-001--design-the-tinyidp-administration-backend-and-widget-dsl-console-mvp/tasks.md — Documentation delivery tasks completed
+
+## 2026-07-24
+
+Completed Phase F hardening: 56-case all-screen fixture coverage, Axe and keyboard accessibility, responsive read-only behavior, real-browser CSP enforcement, deterministic Widget IR safety validation, tablet snapshot, 10,000-user benchmark, and all release gates (commit 972a0a3).
+
+### Related Files
+
+- /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/internal/adminweb/frontend/tests/admin-console.spec.ts — Browser acceptance matrix, accessibility, responsive, visual, and CSP evidence
+- /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/internal/adminweb/widget_runtime.go — Deterministic Widget IR schema, component, authority, secret, code, and URL validation
+- /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/pkg/sqlitestore/admin_queries_benchmark_test.go — Measured 10,000-user query acceptance evidence

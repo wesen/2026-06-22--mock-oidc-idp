@@ -30,6 +30,12 @@ RelatedFiles:
       Note: Application administration and one-time secret UI
     - Path: repo://internal/adminweb/frontend/src/InvitationManagement.tsx
       Note: Invitation administration and one-time code UI
+    - Path: repo://internal/adminweb/frontend/tests/admin-console.spec.ts
+      Note: Phase F browser acceptance suite and fixture matrix (commit 972a0a3)
+    - Path: repo://internal/adminweb/handler_test.go
+      Note: HTTP CSP, no-store, unknown-field, origin, CSRF, and body-bound evidence (commit 972a0a3)
+    - Path: repo://internal/adminweb/widget_runtime.go
+      Note: Deterministic Widget IR release validator (commit 972a0a3)
     - Path: repo://internal/cmds/admin.go
       Note: Registers the console operator command group
     - Path: repo://internal/cmds/admin_client.go
@@ -76,6 +82,8 @@ RelatedFiles:
       Note: Evidence for point queries and atomic mutations
     - Path: repo://pkg/sqlitestore/admin_projection.go
       Note: Canonical user projection rebuild and drift checker
+    - Path: repo://pkg/sqlitestore/admin_queries_benchmark_test.go
+      Note: 10,000-user query benchmark (commit 972a0a3)
     - Path: repo://pkg/sqlitestore/admin_store.go
       Note: SQLite implementation of administration security state and atomic updates
     - Path: repo://pkg/sqlitestore/admin_store_test.go
@@ -94,6 +102,7 @@ LastUpdated: 2026-07-23T20:14:57.931345362-04:00
 WhatFor: Preserve how the administration-backend proposal was derived, including concrete evidence, failed assumptions, and review instructions.
 WhenToUse: Read when reviewing the design, implementing a phase, or continuing the investigation.
 ---
+
 
 
 
@@ -2068,3 +2077,274 @@ suite will be rerun again before Phase E is closed.
   cancellation/join behavior at the host boundary.
 - Update ticket tasks and changelog, then run the final Phase E gates and
   commit the managed-operation checkpoint.
+
+## Step 14: Harden the console and prove the release gates
+
+Phase F closes the implementation with deterministic Widget IR validation,
+real-browser accessibility and security checks, an exercised failure-state
+matrix, a stable tablet image, and a measured 10,000-user query benchmark. The
+browser suite runs against the production Vite bundle because that is the
+artifact embedded into the Go binary and is the correct compatibility boundary
+for the published Widget renderer.
+
+The final repository-wide acceptance run completed successfully. Generation,
+formatting, every Go test package, the exact full build, lint plus both custom
+analyzers, frontend typecheck/build, and all six Playwright tests passed. This
+checkpoint is committed as `972a0a3`.
+
+### Prompt Context
+
+**User prompt (verbatim):** (same as Step 4)
+
+**Assistant interpretation:** Finish the implementation rather than stopping at
+the functional backend, preserve detailed debugging and validation evidence,
+and commit a release-ready Phase F checkpoint.
+
+**Inferred user intent:** Make the implemented ticket withstand a
+requirement-by-requirement review, including browser behavior and reproducible
+release commands, while leaving a new intern enough context to understand why
+each hardening mechanism exists.
+
+**Commit (code):** `972a0a3` — `test(admin): complete console hardening gates`
+
+### What I did
+
+- Added Playwright and Axe dependencies, a production-bundle test server, and a
+  six-test browser suite.
+- Exercised all seven screens across loading, empty, no-results, forbidden,
+  stale, session-expired, audit-degraded, and operation-failed states: 56
+  rendered combinations.
+- Verified keyboard focus starts at the skip link, semantic landmarks and
+  headings exist, and Axe reports no violations.
+- Added tablet and emergency small-screen checks:
+  - tablet navigation remains usable;
+  - reduced-motion CSS is active;
+  - mutation surfaces disappear below 480 pixels while read-only information
+    and a warning remain visible.
+- Added a committed tablet screenshot baseline.
+- Added the exact administration CSP to the production preview and verified in
+  Chromium that inline and external scripts are rejected.
+- Tightened HTTP contract tests for every CSP directive, absence of
+  `unsafe-inline`, `unsafe-eval`, and remote script origins, mutation
+  `Cache-Control: no-store`, unknown JSON fields, and body-size limits.
+- Added `object-src 'none'` to the production CSP to match the imported UX
+  contract.
+- Fixed Widget DSL row normalization: xgoja proxy row objects are now copied
+  into plain objects before passing them to `DataTable`, so IDs and safe display
+  values survive JSON serialization.
+- Added deterministic Widget IR checks for:
+  - schema version, page ID, title, and component root;
+  - byte, node, depth, key, and string bounds;
+  - a closed component allowlist;
+  - forbidden authority, SQL, code, raw-secret/hash/private-key properties;
+  - external, JavaScript, and inline-script values.
+- Rendered every screen/state fixture through the same xgoja provider used in
+  production and asserted that normalized rows survive.
+- Added and ran `BenchmarkListAdminUsers10000`.
+- Ran the complete release commands and committed the resulting frontend
+  embedded assets and logcopter stubs.
+
+### Why
+
+- Widget IR is presentation input crossing a JavaScript-to-Go-to-browser
+  boundary. Schema validation and a closed component/content policy prevent it
+  from becoming a second authorization, code-execution, or secret transport
+  channel.
+- Declaring fixture names is weaker than rendering them. The 56-case matrix
+  proves each required state reaches every screen.
+- CSP string tests prove the server contract, while Chromium tests prove the
+  browser actually enforces the policy.
+- The 10,000-user benchmark turns the UX scale target into reproducible
+  evidence rather than an assumption.
+
+### What worked
+
+- The final Playwright run completed:
+
+  ```text
+  Running 6 tests using 1 worker
+  6 passed (14.8s)
+  ```
+
+- The benchmark completed at:
+
+  ```text
+  BenchmarkListAdminUsers10000-8  20  112868 ns/op  17505 B/op  458 allocs/op
+  ```
+
+- The exact full Go suite completed with every package passing, including the
+  previously flaky Fosite linearizability package:
+
+  ```text
+  GOCACHE=/tmp/tiny-idp-go-cache go test ./... -count=1
+  Process exited with code 0
+  ```
+
+- `go generate ./...`, `go fmt ./...`, `go build ./...`, `pnpm run check`, and
+  `make lint` all completed successfully.
+- The pre-commit hook independently reran package tests and lint and reported:
+
+  ```text
+  0 issues.
+  ✔️ lint
+  ✔️ test
+  ```
+
+### What didn't work
+
+- The first browser server readiness URL used `/admin`, which Vite does not
+  serve. Playwright timed out waiting for it. The readiness URL was corrected
+  to `/static/admin/`, matching the configured Vite base.
+- Fetching transformed development HTML still produced a blank application.
+  The browser trace revealed the actual error:
+
+  ```text
+  Calling `require` for "react" in an environment that doesn't expose the `require` function.
+  See https://rolldown.rs/in-depth/bundling-cjs#require-external-modules
+  ```
+
+  The published `@go-go-golems/rag-evaluation-site` dependency contains a
+  CommonJS React external that Vite's development dependency optimizer does not
+  expose correctly. The production Vite build already bundles it correctly, so
+  Playwright now builds and serves `vite preview`.
+- The first snapshot invocation accidentally passed an extra `--` through
+  pnpm:
+
+  ```text
+  Error: No tests found.
+  ```
+
+  Running `pnpm exec playwright test --update-snapshots` passed the flag
+  directly.
+- The initial keyboard assertion expected the console-brand link to receive
+  first focus. The actual and desirable first target is `Skip to content`.
+- Axe found three Bootstrap color combinations below WCAG AA and a missing
+  page-level heading. The heading and scoped darker primary colors fixed the
+  production UI; the final Axe scan is clean.
+- A request event is visible to Playwright even when Chromium blocks an
+  external script under CSP. The reliable browser evidence is the rejected
+  `addScriptTag` operation whose error names the Content Security Policy, not
+  absence of the DevTools request event.
+- The first formatting invocation used the read-only default Go cache:
+
+  ```text
+  pattern ./...: open /home/manuel/.cache/go-build/...: read-only file system
+  ```
+
+  Re-running with `GOCACHE=/tmp/tiny-idp-go-cache` completed.
+- The first sandboxed build could not read linked-worktree VCS metadata:
+
+  ```text
+  error obtaining VCS status: exit status 128
+  ```
+
+  The exact `go build ./...` command passed with approved access to that
+  metadata; VCS stamping was not disabled.
+
+### What I learned
+
+- Browser acceptance should exercise the built artifact for packages whose
+  development-module shape differs from their production bundle.
+- xgoja array elements can be proxy objects that look correct to JavaScript but
+  become empty objects when the Widget builder serializes them. Copying a
+  fixed safe field set into plain objects both fixes serialization and narrows
+  the data boundary.
+- Bootstrap 5's default primary color narrowly misses AA contrast on the
+  tertiary and widget backgrounds at normal text size. A scoped darker primary
+  is required for this console.
+- CSP enforcement is best proven at two layers: exact server headers and actual
+  browser rejection.
+
+### What was tricky to build
+
+- The blank browser page initially resembled a routing problem because the
+  application is mounted at `/admin` while assets live under `/static/admin`.
+  Network traces proved the HTML and every transformed module loaded with 200
+  responses; the page error then isolated the CommonJS external. Switching to
+  the production artifact solved the actual compatibility boundary without
+  adding a backwards-compatibility adapter.
+- Screenshot updates had to happen only after semantic and contrast changes
+  stabilized. The final run without `--update-snapshots` proves the committed
+  baseline is reproducible.
+- The all-state matrix must isolate routes between iterations. Each fixture
+  waits for route teardown before installing the next state, preventing a
+  prior screen's mocks from weakening later assertions.
+
+### What warrants a second pair of eyes
+
+- Review the Widget IR forbidden-property list when adding new upstream widget
+  components. New fields should be deliberately allowed, not accepted by
+  default.
+- Review the snapshot on a reMarkable or desktop display for hierarchy and
+  density; pixel stability does not replace human design review.
+- The benchmark is a bounded query microbenchmark, not a concurrent production
+  load test. Re-run it when query filters, indexes, or SQLite connection policy
+  change.
+
+### What should be done in the future
+
+- If the upstream Widget package becomes natively ESM-compatible in Vite dev
+  mode, the Playwright production-bundle harness should still remain because it
+  verifies the artifact actually shipped.
+- Add desktop snapshots if future layout work introduces desktop-only
+  branching; the current tablet baseline covers the MVP's required responsive
+  breakpoint.
+
+### Code review instructions
+
+- Start with:
+  - `internal/adminweb/widget_runtime.go`;
+  - `internal/adminweb/verbs/pages.js`;
+  - `internal/adminweb/frontend/tests/admin-console.spec.ts`;
+  - `internal/adminweb/handler_test.go`;
+  - `pkg/sqlitestore/admin_queries_benchmark_test.go`.
+- Inspect the committed image at
+  `internal/adminweb/frontend/tests/admin-console.spec.ts-snapshots/operations-tablet-linux.png`.
+- Reproduce the focused acceptance evidence:
+
+  ```text
+  GOCACHE=/tmp/tiny-idp-go-cache go test ./internal/adminweb ./pkg/idpadminapp ./pkg/sqlitestore -count=1
+  GOCACHE=/tmp/tiny-idp-go-cache go test ./pkg/sqlitestore -run '^$' -bench '^BenchmarkListAdminUsers10000$' -benchmem -benchtime=20x
+  pnpm --dir internal/adminweb/frontend run check
+  pnpm --dir internal/adminweb/frontend exec playwright test
+  ```
+
+- Reproduce the release gate:
+
+  ```text
+  GOCACHE=/tmp/tiny-idp-go-cache go generate ./...
+  GOCACHE=/tmp/tiny-idp-go-cache go fmt ./...
+  GOCACHE=/tmp/tiny-idp-go-cache go test ./... -count=1
+  GOCACHE=/tmp/tiny-idp-go-cache go build ./...
+  make lint
+  ```
+
+### Technical details
+
+The browser acceptance topology is:
+
+```text
+Playwright Chromium
+    |
+    +-- /admin/<screen> document
+    |      `-- route to production index at /static/admin/
+    |
+    +-- hashed/bundled assets from Vite preview
+    |
+    +-- mocked authenticated JSON APIs
+    |
+    `-- reviewed CSP response headers
+            +-- inline script rejected
+            `-- external script rejected
+```
+
+The Widget IR release boundary is:
+
+```text
+safe Go page DTO
+    -> tinyidp.admin.pageData()
+    -> reviewed pages.js field copy
+    -> widget.dsl typed builders
+    -> JSON normalization and deterministic validator
+    -> defaultWidgetRegistry in React
+```
