@@ -326,6 +326,10 @@ func TestProductionCommandRequiresSignupProgramAndDropsLegacyRegistrationFlag(t 
 	if !ok || !lookupKey.Required {
 		t.Fatal("invitation lookup key must be required for administration issuance")
 	}
+	backupRoot, ok := section.GetDefinitions().Get("admin-backup-root")
+	if !ok || !backupRoot.Required {
+		t.Fatal("admin-backup-root must be explicit production configuration")
+	}
 	for _, conditional := range []string{"email-challenge-key-file", "email-smtp-address", "email-smtp-tls-mode", "email-smtp-password-file", "email-from-address"} {
 		definition, ok := section.GetDefinitions().Get(conditional)
 		if !ok || definition.Required {
@@ -351,6 +355,18 @@ func TestProductionCommandRequiresSignupProgramAndDropsLegacyRegistrationFlag(t 
 	}
 	if _, legacy := section.GetDefinitions().Get("message-desk-origin"); legacy {
 		t.Fatal("legacy message-desk-origin production flag is still exposed")
+	}
+}
+
+func TestAppendReadinessCheckFailsClosedAndRetainsDegradedChecks(t *testing.T) {
+	report := appendReadinessCheck(
+		idp.ReadinessReport{Ready: true},
+		idp.ReadinessCheck{Name: "outbox", Ready: true, Degraded: true},
+		idp.ReadinessCheck{Name: "operations", Ready: false, Degraded: true},
+	)
+	if report.Ready || len(report.Checks) != 2 ||
+		!report.Checks[0].Degraded || report.Checks[1].Ready {
+		t.Fatalf("combined readiness = %#v", report)
 	}
 }
 

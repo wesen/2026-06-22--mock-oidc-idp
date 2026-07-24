@@ -57,6 +57,24 @@ func (staticUserExecutor) Execute(
 	return []byte(`{"ok":true}`), nil
 }
 
+type staticDownloadProvider struct{}
+
+func (staticDownloadProvider) Issue(
+	context.Context,
+	idpadmin.AdminPrincipal,
+	string,
+) (idpadminapp.DownloadGrant, error) {
+	return idpadminapp.DownloadGrant{}, nil
+}
+
+func (staticDownloadProvider) Consume(
+	context.Context,
+	idpadmin.AdminPrincipal,
+	string,
+) (idpadminapp.ConsumedDownload, error) {
+	return idpadminapp.ConsumedDownload{}, nil
+}
+
 func TestHandlerMountsPublicSurfaceWithSecurityHeaders(t *testing.T) {
 	store := openAuthStore(t)
 	auth, err := adminweb.NewAuthManager(adminweb.AuthConfig{
@@ -72,6 +90,7 @@ func TestHandlerMountsPublicSurfaceWithSecurityHeaders(t *testing.T) {
 	handler, err := adminweb.NewHandler(adminweb.HandlerConfig{
 		Auth: auth, Pages: staticPageProvider{}, Widgets: widgets,
 		Actions: staticActionPreparer{}, Commands: staticUserExecutor{},
+		Downloads: staticDownloadProvider{},
 		SPA: http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 			_, _ = writer.Write([]byte("spa"))
 		}),
@@ -170,7 +189,8 @@ func TestHandlerGuardsPrepareAndExecuteWithSessionOriginAndCSRF(t *testing.T) {
 	handler, err := adminweb.NewHandler(adminweb.HandlerConfig{
 		Auth: auth, Pages: staticPageProvider{}, Widgets: widgets,
 		Actions: actions, Commands: users,
-		SPA: http.NotFoundHandler(), Assets: http.NotFoundHandler(),
+		Downloads: staticDownloadProvider{},
+		SPA:       http.NotFoundHandler(), Assets: http.NotFoundHandler(),
 	})
 	require.NoError(t, err)
 

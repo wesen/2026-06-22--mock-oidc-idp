@@ -235,9 +235,18 @@ func (s *PageDataService) operations(ctx context.Context) (map[string]any, error
 			"id": row.ID, "primary": row.Kind, "secondary": row.ErrorCode, "status": row.Status,
 		})
 	}
-	return pageData("operations", "Operations", []map[string]string{
+	metrics := []map[string]string{
 		{"label": "Pending audit", "value": strconv.FormatInt(view.PendingOutbox, 10)},
-	}, items, "Background operations", "Long-running work and audit delivery state."), nil
+	}
+	if view.LastAuditError != "" {
+		metrics = append(metrics, map[string]string{
+			"label": "Last audit error", "value": view.LastAuditError,
+		})
+	}
+	return pageData(
+		"operations", "Operations", metrics, items,
+		"Background operations", "Long-running work and audit delivery state.",
+	), nil
 }
 
 func pageData(

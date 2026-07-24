@@ -37,9 +37,9 @@
 
 ## Phase E — Keys and operations
 
-- [ ] Add safe key rotation/retirement; keep purge CLI-only.
-- [ ] Add doctor, managed backup create/verify, and sanitized diagnostics.
-- [ ] Add outbox/operation workers and health reporting.
+- [x] Add safe key rotation/retirement; keep purge CLI-only.
+- [x] Add doctor, managed backup create/verify, and sanitized diagnostics.
+- [x] Add outbox/operation workers and health reporting.
 
 ## Phase F — Hardening and release
 

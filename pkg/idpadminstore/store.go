@@ -111,6 +111,24 @@ type OutboxHealth struct {
 	LastErrorCode string
 }
 
+type OperationHealth struct {
+	Pending       int64
+	Running       int64
+	OldestActive  *time.Time
+	LastErrorCode string
+}
+
+type DownloadRecord struct {
+	HandleHash   []byte
+	OperationID  string
+	RelativePath string
+	ContentType  string
+	DownloadName string
+	CreatedAt    time.Time
+	ExpiresAt    time.Time
+	ConsumedAt   *time.Time
+}
+
 type ProjectionReport struct {
 	SourceRows     int `json:"source_rows"`
 	ProjectionRows int `json:"projection_rows"`
@@ -166,8 +184,13 @@ type WorkerStore interface {
 	CreateAdminOperation(ctx context.Context, operation Operation) error
 	ClaimAdminOperation(ctx context.Context, id string, startedAt time.Time) (bool, error)
 	ListPendingAdminOperations(ctx context.Context, limit int) ([]Operation, error)
+	RequeueRunningAdminOperations(ctx context.Context, updatedAt time.Time) (int64, error)
 	CompleteAdminOperation(ctx context.Context, id string, result []byte, relativePath string, completedAt time.Time) error
 	FailAdminOperation(ctx context.Context, id, errorCode string, completedAt time.Time) error
+	GetAdminOperation(ctx context.Context, id string) (Operation, error)
+	GetAdminOperationHealth(ctx context.Context) (OperationHealth, error)
+	CreateAdminDownload(ctx context.Context, record DownloadRecord) error
+	ConsumeAdminDownload(ctx context.Context, handleHash []byte, now time.Time) (DownloadRecord, error)
 }
 
 type InvitationStore interface {
@@ -180,6 +203,7 @@ type TxStore interface {
 	AuthAttemptStore
 	SecurityStore
 	InvitationStore
+	CreateAdminOperation(ctx context.Context, operation Operation) error
 }
 
 type AtomicStore interface {

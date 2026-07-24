@@ -28,6 +28,10 @@ const (
 	CommandClientsRotateSecret = "clients.rotate_secret"
 	CommandKeysRotate          = "keys.rotate"
 	CommandKeysRetire          = "keys.retire"
+	CommandOperationsDoctor    = "operations.doctor"
+	CommandBackupCreate        = "operations.backup.create"
+	CommandBackupVerify        = "operations.backup.verify"
+	CommandDiagnosticsCreate   = "operations.diagnostics"
 )
 
 var (
@@ -237,6 +241,25 @@ func actionDefinition(command string) (ActionDefinition, bool) {
 			Command: CommandKeysRetire, Capability: idpadmin.CapabilityKeysRetire,
 			TargetType: "signing_key", RequireTarget: true, RequireExisting: true,
 			RequireFresh: true, RequireReason: true, ConfirmationText: "RETIRE",
+		},
+		CommandOperationsDoctor: {
+			Command: CommandOperationsDoctor, Capability: idpadmin.CapabilityOperationsDoctor,
+			TargetType: "operation", GenerateTarget: true,
+		},
+		CommandBackupCreate: {
+			Command: CommandBackupCreate, Capability: idpadmin.CapabilityBackupCreate,
+			TargetType: "operation", GenerateTarget: true,
+			RequireFresh: true, RequireReason: true, ConfirmationText: "BACKUP",
+		},
+		CommandBackupVerify: {
+			Command: CommandBackupVerify, Capability: idpadmin.CapabilityBackupVerify,
+			TargetType: "operation", RequireTarget: true, RequireExisting: true,
+			RequireFresh: true, RequireReason: true, ConfirmationText: "VERIFY",
+		},
+		CommandDiagnosticsCreate: {
+			Command: CommandDiagnosticsCreate, Capability: idpadmin.CapabilityDiagnosticsRead,
+			TargetType: "operation", GenerateTarget: true,
+			RequireFresh: true, RequireReason: true, ConfirmationText: "DIAGNOSTICS",
 		},
 	}
 	definition, ok := definitions[command]

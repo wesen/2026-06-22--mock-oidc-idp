@@ -11,11 +11,13 @@ import (
 )
 
 type outboxStoreStub struct {
-	records      []idpadminstore.AuditOutboxRecord
-	health       idpadminstore.OutboxHealth
-	deliveredIDs []string
-	failedIDs    []string
-	nextAttempt  time.Time
+	records         []idpadminstore.AuditOutboxRecord
+	health          idpadminstore.OutboxHealth
+	deliveredIDs    []string
+	failedIDs       []string
+	nextAttempt     time.Time
+	operationHealth idpadminstore.OperationHealth
+	requeued        int64
 }
 
 func (s *outboxStoreStub) ListPendingAudit(context.Context, time.Time, int) ([]idpadminstore.AuditOutboxRecord, error) {
@@ -42,16 +44,41 @@ func (*outboxStoreStub) ClaimAdminOperation(context.Context, string, time.Time) 
 func (*outboxStoreStub) ListPendingAdminOperations(context.Context, int) ([]idpadminstore.Operation, error) {
 	return nil, nil
 }
+func (s *outboxStoreStub) RequeueRunningAdminOperations(context.Context, time.Time) (int64, error) {
+	s.requeued++
+	return s.requeued, nil
+}
 func (*outboxStoreStub) CompleteAdminOperation(context.Context, string, []byte, string, time.Time) error {
 	return nil
 }
 func (*outboxStoreStub) FailAdminOperation(context.Context, string, string, time.Time) error {
 	return nil
 }
+func (*outboxStoreStub) GetAdminOperation(context.Context, string) (idpadminstore.Operation, error) {
+	return idpadminstore.Operation{}, nil
+}
+func (s *outboxStoreStub) GetAdminOperationHealth(context.Context) (idpadminstore.OperationHealth, error) {
+	return s.operationHealth, nil
+}
+func (*outboxStoreStub) CreateAdminDownload(context.Context, idpadminstore.DownloadRecord) error {
+	return nil
+}
+func (*outboxStoreStub) ConsumeAdminDownload(context.Context, []byte, time.Time) (idpadminstore.DownloadRecord, error) {
+	return idpadminstore.DownloadRecord{}, nil
+}
 
 type failingSink struct{}
 
 func (failingSink) Emit(context.Context, idp.Event) error { return errors.New("unavailable") }
+
+type operationRunnerStub struct{}
+
+func (operationRunnerStub) Execute(
+	context.Context,
+	idpadminstore.Operation,
+) ([]byte, string, error) {
+	return []byte(`{}`), "", nil
+}
 
 func TestOutboxWorkerDeliversSafeEventOnce(t *testing.T) {
 	now := time.Date(2026, time.July, 23, 14, 0, 0, 0, time.UTC)
@@ -117,4 +144,37 @@ func TestOutboxWorkerStopsOnCancellation(t *testing.T) {
 	}
 }
 
+func TestOperationWorkerReadinessFailsForStalledWork(t *testing.T) {
+	now := time.Date(2026, time.July, 23, 15, 0, 0, 0, time.UTC)
+	oldest := now.Add(-maximumOperationAge)
+	store := &outboxStoreStub{operationHealth: idpadminstore.OperationHealth{
+		Pending: 1, OldestActive: &oldest,
+	}}
+	worker, err := NewOperationWorker(store, operationRunnerStub{}, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := worker.Readiness(context.Background())
+	if check.Ready || !check.Degraded || check.Reason != "operation_stalled" {
+		t.Fatalf("readiness = %#v", check)
+	}
+}
+
+func TestOperationWorkerRequeuesAndJoinsOnCancellation(t *testing.T) {
+	store := &outboxStoreStub{}
+	worker, err := NewOperationWorker(store, operationRunnerStub{}, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := worker.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if store.requeued != 1 {
+		t.Fatalf("requeue calls = %d, want 1", store.requeued)
+	}
+}
+
 var _ idpadminstore.WorkerStore = (*outboxStoreStub)(nil)
+var _ OperationRunner = operationRunnerStub{}

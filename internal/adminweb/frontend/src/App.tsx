@@ -8,6 +8,7 @@ import { UserManagement } from "./UserManagement";
 import { InvitationManagement } from "./InvitationManagement";
 import { ClientManagement } from "./ClientManagement";
 import { KeyManagement } from "./KeyManagement";
+import { OperationsManagement } from "./OperationsManagement";
 
 const pages = [
   ["overview", "Overview"],
@@ -80,6 +81,7 @@ export function App() {
         {page === "invitations" && <InvitationManagement session={session.data} />}
         {page === "clients" && <ClientManagement session={session.data} />}
         {page === "keys" && <KeyManagement session={session.data} />}
+        {page === "operations" && <OperationsManagement session={session.data} />}
       </main>
       <WidgetToastRegion />
     </div>

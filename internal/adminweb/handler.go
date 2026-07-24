@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/go-go-golems/tiny-idp/pkg/idpadmin"
@@ -29,19 +31,26 @@ type ActionExecutor interface {
 	Execute(context.Context, idpadminapp.ExecutionRequest, []byte) ([]byte, error)
 }
 
+type DownloadProvider interface {
+	Issue(context.Context, idpadmin.AdminPrincipal, string) (idpadminapp.DownloadGrant, error)
+	Consume(context.Context, idpadmin.AdminPrincipal, string) (idpadminapp.ConsumedDownload, error)
+}
+
 type HandlerConfig struct {
-	Auth     *AuthManager
-	Pages    PageDataProvider
-	Widgets  *WidgetRuntime
-	Actions  ActionPreparer
-	Commands ActionExecutor
-	SPA      http.Handler
-	Assets   http.Handler
+	Auth      *AuthManager
+	Pages     PageDataProvider
+	Widgets   *WidgetRuntime
+	Actions   ActionPreparer
+	Commands  ActionExecutor
+	Downloads DownloadProvider
+	SPA       http.Handler
+	Assets    http.Handler
 }
 
 func NewHandler(config HandlerConfig) (http.Handler, error) {
 	if config.Auth == nil || config.Pages == nil || config.Widgets == nil ||
 		config.Actions == nil || config.Commands == nil ||
+		config.Downloads == nil ||
 		config.SPA == nil || config.Assets == nil {
 		return nil, errors.New("admin auth, pages, widgets, actions, users, SPA, and assets are required")
 	}
@@ -57,10 +66,66 @@ func NewHandler(config HandlerConfig) (http.Handler, error) {
 	mux.Handle("GET /api/widget/pages/{page}", config.Auth.Authenticate(widgetPageHandler(config.Pages, config.Widgets)))
 	mux.Handle("POST /api/widget/actions/prepare", config.Auth.RequireCSRF(prepareActionHandler(config.Actions)))
 	mux.Handle("POST /api/widget/actions/execute", config.Auth.RequireCSRF(executeActionHandler(config.Commands)))
+	mux.Handle("POST /api/admin/operations/{operation}/downloads", config.Auth.RequireCSRF(issueDownloadHandler(config.Downloads)))
+	mux.Handle("GET /api/admin/downloads/{handle}", config.Auth.Authenticate(consumeDownloadHandler(config.Downloads)))
 	mux.Handle("/static/admin/", http.StripPrefix("/static/admin/", config.Assets))
 	mux.Handle("/admin", config.SPA)
 	mux.Handle("/admin/", config.SPA)
 	return securityHeaders(mux), nil
+}
+
+func issueDownloadHandler(downloads DownloadProvider) http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		principal, ok := Principal(request.Context())
+		if !ok {
+			writeJSONError(writer, http.StatusUnauthorized, "authentication_required")
+			return
+		}
+		grant, err := downloads.Issue(
+			request.Context(), principal, request.PathValue("operation"),
+		)
+		if err != nil {
+			writeAdminError(writer, err)
+			return
+		}
+		writer.Header().Set("Cache-Control", "no-store")
+		writeJSON(writer, http.StatusCreated, grant)
+	})
+}
+
+func consumeDownloadHandler(downloads DownloadProvider) http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		principal, ok := Principal(request.Context())
+		if !ok {
+			writeJSONError(writer, http.StatusUnauthorized, "authentication_required")
+			return
+		}
+		download, err := downloads.Consume(
+			request.Context(), principal, request.PathValue("handle"),
+		)
+		if err != nil {
+			writeAdminError(writer, err)
+			return
+		}
+		file, err := os.Open(download.Path)
+		if err != nil {
+			writeJSONError(writer, http.StatusNotFound, "download_not_found")
+			return
+		}
+		defer file.Close()
+		info, err := file.Stat()
+		if err != nil || !info.Mode().IsRegular() {
+			writeJSONError(writer, http.StatusNotFound, "download_not_found")
+			return
+		}
+		writer.Header().Set("Cache-Control", "no-store")
+		writer.Header().Set("Content-Type", download.ContentType)
+		writer.Header().Set(
+			"Content-Disposition",
+			`attachment; filename="`+filepath.Base(download.DownloadName)+`"`,
+		)
+		http.ServeContent(writer, request, download.DownloadName, info.ModTime(), file)
+	})
 }
 
 func clientDetailHandler(pages PageDataProvider) http.Handler {

@@ -29,6 +29,7 @@ type resourceCommandFixture struct {
 	invitations *idpadminapp.InvitationCommandService
 	clients     *idpadminapp.ClientCommandService
 	keys        *idpadminapp.KeyCommandService
+	operations  *idpadminapp.OperationCommandService
 	sequence    int
 }
 
@@ -255,13 +256,15 @@ func newResourceCommandFixture(t *testing.T) *resourceCommandFixture {
 	require.NoError(t, store.InitializeAdminResourceVersions(ctx, now))
 	keyCommands, err := idpadminapp.NewKeyCommandService(store, executor, clock)
 	require.NoError(t, err)
+	operations, err := idpadminapp.NewOperationCommandService(store, executor, clock)
+	require.NoError(t, err)
 	return &resourceCommandFixture{
 		ctx: ctx, now: now, store: store, actions: actions,
 		principal: idpadmin.AdminPrincipal{
 			Subject: "owner-sub", SessionID: "session-binding", Authenticated: now,
 			Assurance: idpadmin.AssuranceFresh, GrantID: grant.ID, GrantVersion: grant.Version,
 		},
-		invitations: invitations, clients: clients, keys: keyCommands,
+		invitations: invitations, clients: clients, keys: keyCommands, operations: operations,
 	}
 }
 

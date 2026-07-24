@@ -10,6 +10,7 @@
 - Completed Phase B with typed read models, a constrained Widget DSL runtime, public admin routing, in-process OIDC discovery, exact-key session configuration, embedded React/Redux/RTK Query/Bootstrap assets, and frontend CI reproducibility checks.
 - Completed Phase C with command-specific capabilities, signed server-prepared actions, transaction-safe user lifecycle commands, reason/confirmation/fresh-auth/version/idempotency enforcement, audit-pending result semantics, shared CLI execution, first-owner atomic provisioning, and React user-operation forms.
 - Completed Phase D with public-ID invitation metadata and revocation, one-time invitation/client secrets, guarded client lifecycle commands, exact field validation, unified HTTP/CLI dispatch, Bootstrap administration forms, RTK Query secret-cache eviction, migration/backfill coverage, and leakage/replay/rotation tests.
+- Completed Phase E with guarded signing-key rotation/retirement, CLI-only emergency purge, durable audit and operation workers, managed doctor/backup/verification/diagnostics jobs, canonical backup-root confinement, hashed one-use downloads, production errgroup lifecycle, readiness health, and React key/operations surfaces.
 
 ## 2026-07-23
 

@@ -1922,3 +1922,149 @@ analyzers.
   diagnostics operations with strict backup-root confinement.
 - Run operation and outbox workers under the production host `errgroup`, then
   expose their safe state in readiness and the Operations page.
+
+## Step 13: Implement managed operations, confined artifacts, and one-use downloads
+
+The long-running operation slice now uses durable `admin_operations` rows.
+The browser can prepare only four commands:
+
+- `operations.doctor`;
+- `operations.backup.create`;
+- `operations.backup.verify`;
+- `operations.diagnostics`.
+
+Backup creation, verification, and diagnostics require fresh authentication,
+an operator reason, and exact typed confirmation. Doctor is read-only and may
+be queued under the doctor capability without step-up. Each accepted request
+creates the operation row, operation resource version, action evidence,
+idempotency receipt, and audit outbox record in the executor's single SQLite
+transaction. Backup verification targets and version-checks the completed
+source operation while receiving its own generated operation identity.
+
+There are no action definitions for restore, migration, or key purge. A
+negative registry test asks `ActionService` to prepare each break-glass
+command and requires `ErrUnknownCommand`.
+
+### Managed root and path confinement
+
+Production now requires the explicit Glazed field `--admin-backup-root`.
+Startup creates it owner-only, resolves its canonical path, and refuses an
+empty value. Browser input contains only an optional 80-character label. The
+server:
+
+1. replaces all non `[A-Za-z0-9._-]` label characters;
+2. combines the sanitized label with the random operation ID;
+3. chooses the fixed `backups/` or `diagnostics/` child directory;
+4. creates/chmods the child directory to `0700`;
+5. resolves the canonical parent and verifies `filepath.Rel` remains below
+   the canonical root;
+6. stores only the slash-normalized relative artifact path.
+
+Verification never accepts a browser path. It loads the relative path from a
+completed managed backup operation, rejects absolute or `..` paths, resolves
+symlinks, verifies confinement again, and then invokes SQLite's read-only
+integrity/schema/checksum verification.
+
+The confinement tests use both an input label containing `../../` and a
+`backups` symlink pointing to an outside directory. The label is sanitized and
+the backup remains inside the root; the symlink case is rejected before the
+backup writer creates an outside file. A forged stored `../escape.db` source
+path is also rejected.
+
+### Diagnostics and download capability
+
+Diagnostics reuse the existing doctor checks but serialize new safe DTOs:
+redacted client rows, redacted signing-key rows, and the safe operations/outbox
+view. They do not serialize `idpstore.Client`, private PEM bytes, database
+paths, hashes, cookies, action keys, or raw error objects. The artifact is
+created with `O_EXCL`, mode `0600`, fsynced, and recorded by relative path.
+
+Download authorization is intentionally two-step:
+
+```text
+authenticated + CSRF POST operation/{id}/downloads
+    -> random 288-bit handle returned once with no-store
+    -> only SHA-256(handle) is persisted
+
+authenticated GET downloads/{raw handle}
+    -> atomic UPDATE ... WHERE consumed_at IS NULL AND expires_at > now
+    -> canonical confinement check
+    -> attachment response with no-store
+```
+
+The handle expires after ten minutes. A second consume returns
+`idpadminstore.ErrNotFound`. The test reads the generated artifact and asserts
+that neither `PRIVATE KEY` nor the Go field name `SecretHash` appears.
+
+Migration 021 adds the hashed one-use download table with operation ownership,
+relative path, bounded server-controlled media metadata, expiry, and consumed
+time. No plaintext handle is stored in the database or operation result.
+
+### Worker lifecycle and health
+
+The operation worker claims one pending row with a conditional state update,
+runs a bounded batch, and writes either a safe result or a stable error code
+such as `backup_create_failed`. On startup it requeues rows left `running` by
+a process interruption. On graceful cancellation it leaves the current row
+running; the next startup performs that recovery rather than attempting a
+database write through an already-cancelled context.
+
+The production host now launches both the audit outbox and operation workers
+in the same `errgroup` as its HTTP servers and maintenance loop. Cancellation
+therefore stops and joins both workers before the store and audit sink close.
+Readiness includes:
+
+- `admin_audit_outbox`, degraded for pending delivery and failed after five
+  minutes;
+- `admin_operations`, degraded for queued/running work and failed when the
+  oldest active operation reaches five minutes.
+
+The Operations page polls the safe read model, exposes the pending-audit count
+and last stable audit error, queues doctor/backup/diagnostics work, offers
+verification only for completed managed backups, and prepares one-use
+diagnostics downloads. Its copy explicitly states that restore and migration
+remain CLI-only.
+
+### Validation and failures
+
+Focused backend, storage, HTTP, production-section, and frontend gates passed:
+
+```text
+pnpm --dir internal/adminweb/frontend run check
+✓ tsc --noEmit
+✓ vite build
+
+go test ./pkg/idpadminapp ./pkg/sqlitestore \
+  ./internal/adminweb ./internal/sections/production -count=1
+ok
+
+go test ./... -run '^$' -count=1
+all packages compile
+
+make lint
+0 issues
+```
+
+As in earlier phases, the first sandboxed lint call could not resolve the
+pinned analyzer through restricted DNS. The approved rerun passed.
+
+The full repository suite passed every package except one pre-existing
+linearizability test, which observed one active refresh token instead of zero:
+
+```text
+TestSQLiteRefreshRotationHistoryIsLinearizableAndReuseRevokesFamily
+count=1, want 0
+```
+
+No Phase E package failed, and the real two-process production harness passed
+with the newly required managed root. The exact failing concurrency test
+passed immediately when rerun alone without any code change, identifying a
+flaky interleaving rather than an administration regression. The complete
+suite will be rerun again before Phase E is closed.
+
+### What is next
+
+- Add or refine production-facing operation/readiness tests and verify
+  cancellation/join behavior at the host boundary.
+- Update ticket tasks and changelog, then run the final Phase E gates and
+  commit the managed-operation checkpoint.

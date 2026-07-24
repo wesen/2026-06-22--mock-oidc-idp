@@ -156,6 +156,50 @@ func (s *Store) ListPendingAdminOperations(ctx context.Context, limit int) ([]id
 	return operations, rows.Err()
 }
 
+func (s *Store) RequeueRunningAdminOperations(ctx context.Context, updatedAt time.Time) (int64, error) {
+	result, err := s.conn().ExecContext(ctx, `
+		UPDATE admin_operations
+		SET status='pending', started_at_ns=NULL, updated_at_ns=?
+		WHERE status='running'`, updatedAt.UTC().UnixNano())
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+func (s *Store) GetAdminOperation(ctx context.Context, id string) (idpadminstore.Operation, error) {
+	row := s.conn().QueryRowContext(ctx, `
+		SELECT id, kind, command, actor_subject, status, label, progress_json,
+		       result_json, relative_result_path, error_code, created_at_ns,
+		       updated_at_ns, started_at_ns, completed_at_ns
+		FROM admin_operations
+		WHERE id=?`, strings.TrimSpace(id))
+	operation, err := scanAdminOperation(row)
+	if err == sql.ErrNoRows {
+		return idpadminstore.Operation{}, idpadminstore.ErrNotFound
+	}
+	return operation, err
+}
+
+func (s *Store) GetAdminOperationHealth(ctx context.Context) (idpadminstore.OperationHealth, error) {
+	var health idpadminstore.OperationHealth
+	var oldest sql.NullInt64
+	if err := s.conn().QueryRowContext(ctx, `
+		SELECT
+			COALESCE(SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status='running' THEN 1 ELSE 0 END), 0),
+			MIN(CASE WHEN status IN ('pending','running') THEN created_at_ns END)
+		FROM admin_operations`).Scan(&health.Pending, &health.Running, &oldest); err != nil {
+		return idpadminstore.OperationHealth{}, err
+	}
+	health.OldestActive = timePointer(oldest)
+	_ = s.conn().QueryRowContext(ctx, `
+		SELECT error_code FROM admin_operations
+		WHERE status='failed' AND error_code<>''
+		ORDER BY updated_at_ns DESC LIMIT 1`).Scan(&health.LastErrorCode)
+	return health, nil
+}
+
 func (s *Store) CompleteAdminOperation(
 	ctx context.Context,
 	id string,
@@ -188,6 +232,56 @@ func (s *Store) FailAdminOperation(
 		strings.TrimSpace(errorCode), completedAt.UTC().UnixNano(),
 		completedAt.UTC().UnixNano(), strings.TrimSpace(id))
 	return requireOne(result, err, idpadminstore.ErrNotFound)
+}
+
+func (s *Store) CreateAdminDownload(ctx context.Context, record idpadminstore.DownloadRecord) error {
+	if len(record.HandleHash) < 16 || strings.TrimSpace(record.OperationID) == "" ||
+		strings.TrimSpace(record.RelativePath) == "" || strings.TrimSpace(record.ContentType) == "" ||
+		strings.TrimSpace(record.DownloadName) == "" || record.CreatedAt.IsZero() ||
+		!record.ExpiresAt.After(record.CreatedAt) {
+		return fmt.Errorf("invalid administration download")
+	}
+	_, err := s.conn().ExecContext(ctx, `
+		INSERT INTO admin_downloads
+			(handle_hash, operation_id, relative_path, content_type, download_name,
+			 created_at_ns, expires_at_ns, consumed_at_ns)
+		VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
+		record.HandleHash, record.OperationID, record.RelativePath, record.ContentType,
+		record.DownloadName, record.CreatedAt.UTC().UnixNano(), record.ExpiresAt.UTC().UnixNano())
+	if isConstraint(err) {
+		return idpadminstore.ErrDuplicate
+	}
+	return err
+}
+
+func (s *Store) ConsumeAdminDownload(
+	ctx context.Context,
+	handleHash []byte,
+	now time.Time,
+) (idpadminstore.DownloadRecord, error) {
+	var record idpadminstore.DownloadRecord
+	var created, expires int64
+	var consumed sql.NullInt64
+	err := s.conn().QueryRowContext(ctx, `
+		UPDATE admin_downloads
+		SET consumed_at_ns=?
+		WHERE handle_hash=? AND consumed_at_ns IS NULL AND expires_at_ns>?
+		RETURNING handle_hash, operation_id, relative_path, content_type,
+		          download_name, created_at_ns, expires_at_ns, consumed_at_ns`,
+		now.UTC().UnixNano(), handleHash, now.UTC().UnixNano()).Scan(
+		&record.HandleHash, &record.OperationID, &record.RelativePath,
+		&record.ContentType, &record.DownloadName, &created, &expires, &consumed,
+	)
+	if err == sql.ErrNoRows {
+		return idpadminstore.DownloadRecord{}, idpadminstore.ErrNotFound
+	}
+	if err != nil {
+		return idpadminstore.DownloadRecord{}, err
+	}
+	record.CreatedAt = time.Unix(0, created).UTC()
+	record.ExpiresAt = time.Unix(0, expires).UTC()
+	record.ConsumedAt = timePointer(consumed)
+	return record, nil
 }
 
 type operationScanner interface {

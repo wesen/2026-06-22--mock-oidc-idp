@@ -107,14 +107,22 @@ func TestAdminOperationClaimAndTerminalLifecycle(t *testing.T) {
 	if err != nil || claimed {
 		t.Fatalf("second claim = %v, %v", claimed, err)
 	}
+	requeued, err := store.RequeueRunningAdminOperations(ctx, now.Add(3*time.Second))
+	if err != nil || requeued != 1 {
+		t.Fatalf("requeue = %d, %v", requeued, err)
+	}
+	claimed, err = store.ClaimAdminOperation(ctx, operation.ID, now.Add(4*time.Second))
+	if err != nil || !claimed {
+		t.Fatalf("reclaim = %v, %v", claimed, err)
+	}
 	if err := store.CompleteAdminOperation(
 		ctx, operation.ID, []byte(`{"verified":true}`), "backups/operation-1.db",
-		now.Add(3*time.Second),
+		now.Add(5*time.Second),
 	); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.FailAdminOperation(
-		ctx, operation.ID, "backup_failed", now.Add(4*time.Second),
+		ctx, operation.ID, "backup_failed", now.Add(6*time.Second),
 	); !errors.Is(err, idpadminstore.ErrNotFound) {
 		t.Fatalf("terminal rewrite error = %v", err)
 	}

@@ -91,6 +91,7 @@ Example:
     --token-secret-file /run/secrets/tinyidp-token \
     --admin-auth-key-file /run/secrets/tinyidp-admin-auth \
     --admin-action-key-file /run/secrets/tinyidp-admin-actions \
+    --admin-backup-root /var/lib/tinyidp/admin-artifacts \
     --clients-file /etc/tinyidp/catalog/clients.json \
     --theme-dir /etc/tinyidp/themes \
     --theme-catalog-file /etc/tinyidp/themes/themes.json \
@@ -405,8 +406,52 @@ func runProductionHost(ctx context.Context, settings *productionsection.Settings
 		_ = store.Close()
 		return err
 	}
+	adminOperations, err := idpadminapp.NewOperationCommandService(store, adminExecutor, time.Now)
+	if err != nil {
+		_ = provider.Close(context.Background())
+		_ = signupManager.Close(context.Background())
+		_ = audit.Close()
+		_ = store.Close()
+		return err
+	}
+	adminOperationRunner, err := idpadminapp.NewManagedOperationRunner(
+		store, settings.AdminBackupRoot, time.Now,
+	)
+	if err != nil {
+		_ = provider.Close(context.Background())
+		_ = signupManager.Close(context.Background())
+		_ = audit.Close()
+		_ = store.Close()
+		return err
+	}
+	adminOperationWorker, err := idpadminapp.NewOperationWorker(store, adminOperationRunner, time.Now)
+	if err != nil {
+		_ = provider.Close(context.Background())
+		_ = signupManager.Close(context.Background())
+		_ = audit.Close()
+		_ = store.Close()
+		return err
+	}
+	adminOutboxWorker, err := idpadminapp.NewOutboxWorker(store, audit, time.Now)
+	if err != nil {
+		_ = provider.Close(context.Background())
+		_ = signupManager.Close(context.Background())
+		_ = audit.Close()
+		_ = store.Close()
+		return err
+	}
+	adminDownloads, err := idpadminapp.NewDownloadService(
+		store, adminAuthorizer, settings.AdminBackupRoot, time.Now,
+	)
+	if err != nil {
+		_ = provider.Close(context.Background())
+		_ = signupManager.Close(context.Background())
+		_ = audit.Close()
+		_ = store.Close()
+		return err
+	}
 	adminCommands, err := idpadminapp.NewCommandDispatcher(
-		adminExecutor, adminUsers, adminInvitations, adminClients, adminKeys,
+		adminExecutor, adminUsers, adminInvitations, adminClients, adminKeys, adminOperations,
 	)
 	if err != nil {
 		_ = provider.Close(context.Background())
@@ -434,7 +479,8 @@ func runProductionHost(ctx context.Context, settings *productionsection.Settings
 	publicAdminHandler, err := adminweb.NewHandler(adminweb.HandlerConfig{
 		Auth: adminAuth, Pages: adminPages, Widgets: adminWidgets,
 		Actions: adminActions, Commands: adminCommands,
-		SPA: adminweb.SPAHandler(), Assets: adminweb.AssetsHandler(),
+		Downloads: adminDownloads,
+		SPA:       adminweb.SPAHandler(), Assets: adminweb.AssetsHandler(),
 	})
 	if err != nil {
 		_ = provider.Close(context.Background())
@@ -485,7 +531,11 @@ func runProductionHost(ctx context.Context, settings *productionsection.Settings
 	}
 	readyPath := strings.TrimSuffix(issuerURL.Path, "/") + "/readyz"
 	handler, err := productionHTTPHandler(provider.Handler(), themeCatalog.AssetsHandler(), publicAdminHandler, runtimes, readyPath, func(readinessCtx context.Context) idp.ReadinessReport {
-		return pluginhost.CombineReadiness(provider.Readiness(readinessCtx), pluginhost.Readiness(readinessCtx, runtimes))
+		return appendReadinessCheck(
+			pluginhost.CombineReadiness(provider.Readiness(readinessCtx), pluginhost.Readiness(readinessCtx, runtimes)),
+			adminOutboxWorker.Readiness(readinessCtx),
+			adminOperationWorker.Readiness(readinessCtx),
+		)
 	}, settings.MaxRequestBytes)
 	if err != nil {
 		_ = pluginhost.Close(context.Background(), runtimes)
@@ -517,7 +567,11 @@ func runProductionHost(ctx context.Context, settings *productionsection.Settings
 		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12},
 	}
 	adminHandler, err := observability.NewAdminHandler(telemetry.Handler(), func(readinessCtx context.Context) idp.ReadinessReport {
-		return pluginhost.CombineReadiness(provider.Readiness(readinessCtx), pluginhost.Readiness(readinessCtx, runtimes))
+		return appendReadinessCheck(
+			pluginhost.CombineReadiness(provider.Readiness(readinessCtx), pluginhost.Readiness(readinessCtx, runtimes)),
+			adminOutboxWorker.Readiness(readinessCtx),
+			adminOperationWorker.Readiness(readinessCtx),
+		)
 	})
 	if err != nil {
 		_ = pluginhost.Close(context.Background(), runtimes)
@@ -537,6 +591,12 @@ func runProductionHost(ctx context.Context, settings *productionsection.Settings
 		MaxHeaderBytes:    1 << 20,
 	}
 	group, groupCtx := errgroup.WithContext(ctx)
+	group.Go(func() error {
+		return adminOutboxWorker.Run(groupCtx)
+	})
+	group.Go(func() error {
+		return adminOperationWorker.Run(groupCtx)
+	})
 	group.Go(func() error {
 		log.Info().Str("addr", settings.Addr).Str("issuer", settings.Issuer).Str("listener_mode", string(listenerMode)).Msg("tinyidp production host listening")
 		var serveErr error
@@ -581,6 +641,14 @@ func runProductionHost(ctx context.Context, settings *productionsection.Settings
 	runErr := group.Wait()
 	closeErr := errors.Join(pluginhost.Close(context.Background(), runtimes), provider.Close(context.Background()), signupManager.Close(context.Background()), audit.Close(), store.Close())
 	return errors.Join(runErr, closeErr)
+}
+
+func appendReadinessCheck(report idp.ReadinessReport, checks ...idp.ReadinessCheck) idp.ReadinessReport {
+	report.Checks = append(report.Checks, checks...)
+	for _, check := range checks {
+		report.Ready = report.Ready && check.Ready
+	}
+	return report
 }
 
 // productionHTTPHandler keeps reviewed interaction assets on the provider's

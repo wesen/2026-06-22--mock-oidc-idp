@@ -54,6 +54,12 @@ export interface PreparedAction {
   expires_at: string;
 }
 
+export interface DownloadGrant {
+  download_handle: string;
+  download_name: string;
+  expires_at: string;
+}
+
 export const adminApi = createApi({
   reducerPath: "adminApi",
   baseQuery: fetchBaseQuery({
@@ -99,6 +105,16 @@ export const adminApi = createApi({
         body: { payload: { actionHandle: prepared.action_handle, input } },
       }),
     }),
+    issueDownload: builder.mutation<
+      DownloadGrant,
+      { operationId: string; csrf: string }
+    >({
+      query: ({ operationId, csrf }) => ({
+        url: `api/admin/operations/${encodeURIComponent(operationId)}/downloads`,
+        method: "POST",
+        headers: { "X-CSRF-Token": csrf },
+      }),
+    }),
   }),
 });
 
@@ -109,4 +125,5 @@ export const {
   useClientDetailQuery,
   usePrepareActionMutation,
   useExecuteActionMutation,
+  useIssueDownloadMutation,
 } = adminApi;

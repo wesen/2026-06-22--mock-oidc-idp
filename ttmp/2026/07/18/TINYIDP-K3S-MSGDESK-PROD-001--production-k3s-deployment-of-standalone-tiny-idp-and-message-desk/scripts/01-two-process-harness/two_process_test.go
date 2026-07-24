@@ -502,6 +502,7 @@ func (h *harness) startTinyIDP() {
 	secret := filepath.Join(h.root, "tinyidp", "secrets", "token.key")
 	adminAuthKey := filepath.Join(h.root, "tinyidp", "secrets", "admin-auth.key")
 	adminActionKey := filepath.Join(h.root, "tinyidp", "secrets", "admin-action.key")
+	adminBackupRoot := filepath.Join(h.root, "tinyidp", "admin-artifacts")
 	invitationKey := filepath.Join(h.root, "tinyidp", "secrets", "invitation.key")
 	clients := filepath.Join(h.repo, "examples", "production-host", "catalog", "clients.json")
 	themeDir := filepath.Join(h.repo, "examples", "production-host", "themes")
@@ -538,6 +539,7 @@ func (h *harness) startTinyIDP() {
 		"--token-secret-file", secret,
 		"--admin-auth-key-file", adminAuthKey,
 		"--admin-action-key-file", adminActionKey,
+		"--admin-backup-root", adminBackupRoot,
 		"--invitation-lookup-key-file", invitationKey,
 		"--trusted-proxy-cidrs", "127.0.0.1/32")
 }
