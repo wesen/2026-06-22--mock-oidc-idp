@@ -117,3 +117,12 @@ separately.
 - /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/devctl/lib/manifests.py — Restricted derived-secret template contract
 - /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/examples/tinyidp-shared-two-apps/compose.yaml — File-delivered shared-demo credentials and network aliases
 - /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/examples/tinyidp-jitsi/compose.yaml — Vault-backed Jitsi integration credentials
+
+## 2026-07-24
+
+Step 20: Began the live profile matrix. Fixtures, script-tools, and the
+production-reference command passed. Updated the stale compile-only signup
+fixture to the current host schema (commit a29a2c2). Embedded and message-app
+runtime acceptance remains incomplete because operating-system process/listener
+evidence contradicted devctl's persisted liveness state; retries stopped under
+the repository debugging limit.

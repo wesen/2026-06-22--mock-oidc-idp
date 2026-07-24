@@ -3217,3 +3217,168 @@ approach was discarded before commit.
 - Use `pnpm exec playwright test --list` in both browser-test directories.
 - Do not run a confirmed state reset unless deletion of that profile's
   application volumes is intentional.
+
+## Step 20 — begin the profile acceptance matrix and identify supervision drift
+
+### Prompt context
+
+The implementation goal continued automatically. Step 19 left only owner
+review and the complete profile acceptance matrix unchecked. The repository's
+two-attempt debugging limit remained binding for the failed admin server path,
+so acceptance began with utility profiles and lightweight direct Go profiles.
+
+### What I did
+
+- Ran the `fixtures`, `script-tools`, and `production-host-local` dynamic
+  commands through devctl.
+- Corrected the compile-only `phase0.js` example from the removed
+  `signupInput` schema to the current host-owned `signupStartInput` schema.
+- Re-ran the script profile and recorded all four deterministic fingerprints.
+- Ignored the root-level `tinyidp.db`, WAL, and shared-memory files created by
+  the embedded example. These are local runtime state, not repository input.
+- Started embedded and message-app profiles under tmux, inspected devctl state
+  and logs, and attempted readiness/discovery checks.
+- Cleaned devctl and tmux state after each failed server acceptance.
+
+### Commands and evidence
+
+The fixture profile rendered the selected development configuration:
+
+```text
+devctl --profile fixtures smoke
+addr: 127.0.0.1:5556
+issuer: http://localhost:5556
+client_id: dev-client
+```
+
+The first script-tools run failed:
+
+```text
+compile signup program: materialize Tiny-IDP program:
+invalid Tiny-IDP program:
+lambda.input_schema at lambdas.signup.lookup.inputSchema
+```
+
+Inspection of `pkg/idpsignup/open_signup.js` and
+`pkg/idpprogram/validate.go` showed that the current host schema is
+`signupStartInput`. After changing both example lambdas, the single corrected
+attempt passed:
+
+```text
+status: valid
+source: examples/tinyidp-script/phase0.js
+profile: signup
+source_fingerprint:
+  efd8189d7725dea87a5aa17a44002b9d0282e8af6cd684625de1a4648ccb97b3
+program_fingerprint:
+  de6eb11bd1fb21f35e0f748e9f4acfa7725340a2b00f4841ebdfc12329ae9a17
+```
+
+The production-reference profile successfully rendered
+`serve-production --help`, including file-only token/admin/email/invitation
+secret flags and the new local-development tutorial.
+
+The schema correction was committed as:
+
+```text
+a29a2c2 fix(dev): align script fixture with signup schema
+```
+
+### What worked
+
+- All three utility/reference profiles execute through the advertised dynamic
+  command surface.
+- The script validator caught a genuine stale example rather than producing a
+  false-positive smoke result.
+- The corrected example passed without weakening validation or changing the
+  host schema.
+- The message-app `prepare.run` initialized its declared state successfully.
+
+### What didn't work
+
+The first embedded tmux invocation used only `devctl up` as the tmux command.
+After `up` returned, tmux closed. The service logged:
+
+```text
+self-contained app listening at http://127.0.0.1:5556
+```
+
+but was gone roughly ten seconds later. I changed the test harness to retain an
+interactive shell after `devctl up`.
+
+The next embedded launch failed immediately:
+
+```text
+listen tcp 127.0.0.1:5556: bind: address already in use
+```
+
+`lsof-who -p 5556 -k` reported no listener immediately before and immediately
+after the launch. After cleanup and a second verified-free launch, the same bind
+error repeated. I stopped that path under the two-attempt rule.
+
+The message-app profile initially reported:
+
+```text
+service started pid=2811750 service=message-app
+up complete services=1
+devctl status: alive=true
+message application listening addr=127.0.0.1:8090
+```
+
+The immediately following readiness request failed:
+
+```text
+curl: (7) Failed to connect to 127.0.0.1 port 8090
+```
+
+`ps` showed no process for the recorded PID and both `ss` and `lsof-who`
+reported no listener, while `devctl status` continued to report `alive=true`.
+No application error was present in stdout or stderr. I did not retry or patch
+around this contradictory supervision state.
+
+### What I learned
+
+- A successful `launch.plan`, `prepare.run`, and `up complete` is insufficient
+  runtime evidence. The tracked PID, operating-system process table, listener,
+  and HTTP endpoint must agree.
+- Devctl's persisted liveness result can disagree with the current process
+  table after the launched service disappears.
+- Retaining the tmux shell does not resolve the direct-process disappearance,
+  so the behavior is not only tmux session teardown.
+- Utility-profile acceptance can proceed independently, but the server matrix
+  cannot be claimed complete while supervision evidence is contradictory.
+
+### What was tricky to diagnose
+
+- The embedded sequence combines `go run`, a child binary, SQLite WAL state,
+  tmux, and devctl process groups. A transient child may own the port even when
+  the recorded `go run` PID is gone.
+- The message-app contradiction is sharper: devctl reported the recorded PID
+  alive after `ps` returned no row. That points at supervision/state
+  interpretation rather than an ordinary application startup error.
+
+### What warrants a second pair of eyes
+
+- Inspect the installed devctl version's detached process and PID-liveness
+  implementation before any more server retries.
+- Determine whether the state file records a process-group leader while status
+  tests an identifier that can be stale or reused.
+- Confirm how `go run` child processes are placed into and terminated with the
+  supervised process group.
+
+### What should be done in the future
+
+- Reproduce the devctl lifecycle in its own repository fixture before changing
+  TinyIDP manifests.
+- Resume embedded/message-app acceptance only after the supervisor behavior is
+  understood.
+- Run external and HTTPS Compose acceptance after confirming port ownership and
+  supervision, then complete restart/logout/negative-secret assertions.
+
+### Code review instructions
+
+- Review commit `a29a2c2` and compare `phase0.js` with
+  `pkg/idpsignup/open_signup.js`.
+- Re-run the three non-server dynamic commands.
+- Treat `uy3a` as incomplete. Static validation and test enumeration are not a
+  substitute for live profile acceptance.
