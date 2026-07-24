@@ -17,6 +17,8 @@ dist/
 .devctl/
 .devctl.override.yaml
 /var/devctl/
+__pycache__/
+*.py[cod]
 
 # Hosted OIDF suite traces include captured HTTP traffic, temporary public
 # endpoints, test-owner identifiers, and development credentials. Keep them in
