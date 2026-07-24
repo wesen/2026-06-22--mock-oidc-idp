@@ -110,14 +110,25 @@ RelatedFiles:
       Note: Indexed administration user query projection
     - Path: repo://pkg/sqlitestore/migrations/019_admin_invitation_lookup.sql
       Note: Public invitation ID lookup migration and backfill
+    - Path: repo://ttmp/2026/07/23/TINYIDP-ADMIN-CONSOLE-001--design-the-tinyidp-administration-backend-and-widget-dsl-console-mvp/scripts/devctl-lifecycle-plugin.py
+      Note: Minimal NDJSON HTTP service plugin used by the full CLI reproduction
+    - Path: repo://ttmp/2026/07/23/TINYIDP-ADMIN-CONSOLE-001--design-the-tinyidp-administration-backend-and-widget-dsl-console-mvp/scripts/reproduce-devctl-up-lifecycle.sh
+      Note: Full devctl up parent-exit lifecycle harness
+    - Path: repo://ttmp/2026/07/23/TINYIDP-ADMIN-CONSOLE-001--design-the-tinyidp-administration-backend-and-widget-dsl-console-mvp/scripts/reproduce-devctl-wrapper-lifecycle.sh
+      Note: Black-box wrapper lifecycle and explicit SIGHUP harness
     - Path: repo://ttmp/2026/07/23/TINYIDP-ADMIN-CONSOLE-001--design-the-tinyidp-administration-backend-and-widget-dsl-console-mvp/sources/local/tiny-idp-ux.md
       Note: Imported source read in full
+    - Path: ws://devctl/cmd/devctl/cmds/wrap_service.go
+      Note: Signal-forwarding implementation fixed in devctl commit 39ba416
+    - Path: ws://devctl/cmd/devctl/cmds/wrap_service_test.go
+      Note: Command-level regression for wrapper self-signaling
 ExternalSources: []
 Summary: Chronological research, design, validation, and delivery record for the TinyIDP administration console MVP ticket.
 LastUpdated: 2026-07-23T20:14:57.931345362-04:00
 WhatFor: Preserve how the administration-backend proposal was derived, including concrete evidence, failed assumptions, and review instructions.
 WhenToUse: Read when reviewing the design, implementing a phase, or continuing the investigation.
 ---
+
 
 
 
@@ -3382,3 +3393,267 @@ around this contradictory supervision state.
 - Re-run the three non-server dynamic commands.
 - Treat `uy3a` as incomplete. Static validation and test enumeration are not a
   substitute for live profile acceptance.
+
+## Step 21 — isolate the devctl wrapper lifecycle
+
+This step moves the runtime investigation into the workspace copy of devctl.
+The immediate goal is to distinguish application failure, parent-shell
+teardown, wrapper failure, and process-group signaling with a minimal service
+that has no TinyIDP dependencies.
+
+The initial source inspection found a potentially unsafe signal topology:
+devctl launches the wrapper as a process-group leader, the wrapper places its
+child in that same group, and the wrapper forwards `SIGHUP` to the entire group.
+Because the wrapper belongs to the target group, forwarding can deliver the
+same signal back to the forwarding process. This is a hypothesis until the
+ticket-local reproduction records the observed behavior.
+
+### Prompt Context
+
+**User prompt (verbatim):** "We put devctl/ in the workspace for you to work on / analyze. Check the things, keep a diary as you debug so we can track your steps. Store any scripts and other files from the experiments/debugging in the scripts folder of the ticket."
+
+**Assistant interpretation:** Diagnose devctl's detached-service lifecycle in
+the workspace checkout, preserve a chronological debugging record, and keep
+all reproduction assets with the current TinyIDP ticket.
+
+**Inferred user intent:** Produce an auditable root-cause investigation that
+can become a tested devctl fix without losing the evidence or repeating
+experiments in later sessions.
+
+**Commit (code):** `39ba41650074a6b203d4c703f46263fd45605533` —
+`fix(supervise): isolate wrapper from service signals`
+
+### What I did
+
+- Confirmed that both the devctl and TinyIDP worktrees were clean before the
+  investigation.
+- Read `Supervisor.startService`, `newWrapServiceCmd`, `ProcessAlive`, existing
+  supervisor tests, and the built-in supervision smoke test.
+- Added `scripts/reproduce-devctl-wrapper-lifecycle.sh`, which launches a
+  minimal Python HTTP server through the real hidden wrapper command and
+  captures process identity, process-group membership, session membership,
+  HTTP readiness, wrapper output, and exit metadata.
+- Added an explicit `--send-hup` mode so baseline survival and signal handling
+  can be tested separately.
+- Added a full-CLI NDJSON fixture and harness that run `devctl up`, allow the
+  parent command to exit, and sample devctl status, the process table, and HTTP
+  reachability over time.
+- Added a command-level Go regression test that launches the real hidden
+  wrapper in a subprocess and asserts that forwarding `SIGHUP` does not
+  signal-terminate the wrapper.
+- Changed the service child to lead its own process group. The wrapper now
+  forwards signals to the child-owned group rather than to its own group.
+
+### Why
+
+- The TinyIDP profiles contain `go run`, SQLite, plugins, and application
+  initialization. A minimal HTTP fixture removes those variables.
+- Process-group and session identifiers are necessary to prove which kernel
+  signal domain is involved; PIDs alone are insufficient.
+- An explicit signal experiment is deterministic and does not depend on tmux
+  teardown timing.
+
+### What worked
+
+- Source inspection confirmed that the wrapper PID persisted by devctl is the
+  wrapper process, not the service child.
+- The existing implementation exposes exit-info and ready-file paths that make
+  a focused black-box reproduction possible.
+- The corrected idle harness kept the wrapper, child, and HTTP endpoint alive
+  until deliberate cleanup.
+- The explicit `SIGHUP` case deterministically reproduced the signal defect:
+  `service.exit.json` recorded `"signal": "hangup"`, the post-signal process
+  snapshot contained neither process, and the invoking shell reported the
+  wrapper itself as `Hangup`.
+- The full `devctl up` fixture survived normal parent exit. At zero, one, and
+  five seconds after `up complete`, `devctl status` reported `alive=true`, the
+  wrapper and child existed, and HTTP returned successfully. The wrapper had
+  been reparented to PID 1.
+- A command-level regression test failed against the unmodified wrapper with:
+
+  ```text
+  Error:       Should be false
+  Messages:    wrapper itself must not die from the forwarded signal
+  ```
+
+  This proves the test detects the defect before the implementation change.
+- After the fix, the targeted regression passed and the black-box result
+  reported `wrapper_wait_status=1`: Cobra returned an ordinary error because
+  the service was intentionally signal-terminated, but the wrapper was not
+  itself signal-terminated.
+- `go test -buildvcs=false ./... -count=1` passed across the complete devctl
+  module with loopback networking enabled.
+- The pre-commit hook independently reran `go test ./...` and
+  `golangci-lint run -v`; both passed with zero lint issues.
+
+### What didn't work
+
+- The first attempt did not reach the experiment because the default Go build
+  cache is read-only in this workspace:
+
+  ```text
+  open /home/manuel/.cache/go-build/31/31aad81fbb12ce35561baa2b623debcfe1bae025d9521afa7f0c723adcd75849-d: read-only file system
+  ```
+
+  The command was:
+
+  ```text
+  go build -o /tmp/devctl-wrapper-debug ./cmd/devctl
+  ```
+
+  The retry uses a dedicated `GOCACHE` below `/tmp`; it does not alter devctl
+  behavior.
+
+- The cache-adjusted build then stopped at VCS stamping:
+
+  ```text
+  error obtaining VCS status: exit status 128
+          Use -buildvcs=false to disable VCS stamping.
+  ```
+
+  The experiment binary does not need repository revision metadata, so the
+  next build follows the tool's explicit `-buildvcs=false` instruction.
+
+- The binary built successfully with the isolated cache and VCS stamping
+  disabled, but the restricted execution namespace prohibits creation of even
+  a loopback socket:
+
+  ```text
+  PermissionError: [Errno 1] Operation not permitted
+  ```
+
+  The exception originated in `socket.socket()` while selecting a free
+  `127.0.0.1` port. The reproduction therefore must run outside the network
+  sandbox; it does not require external network access.
+
+- The first network-enabled harness run raced application readiness:
+
+  ```text
+  curl: (7) Failed to connect to 127.0.0.1 port 32923 after 0 ms: Couldn't connect to server
+  ```
+
+  The wrapper ready file only proves that `child.Start()` succeeded. It does
+  not prove that the child completed its own initialization. The harness now
+  polls the HTTP endpoint for up to five seconds and fails with preserved logs
+  if application readiness never arrives.
+
+- After the implementation change, the targeted regression passed. The first
+  broader package run passed `pkg/state` and `cmd/devctl/cmds`, but two existing
+  `pkg/supervise` tests could not create their loopback listeners in the
+  restricted namespace:
+
+  ```text
+  listen tcp 127.0.0.1:0: socket: operation not permitted
+  ```
+
+  Those same packages must be rerun with loopback networking enabled before
+  the result is considered validated.
+
+- The first scoped commit attempt could not create the external worktree lock:
+
+  ```text
+  fatal: Unable to create '/home/manuel/code/wesen/go-go-golems/devctl/.git/worktrees/devctl/index.lock': Read-only file system
+  ```
+
+  The workspace files are writable, but this checkout's Git administrative
+  directory is stored in the source repository outside the workspace write
+  boundary. Staging and committing therefore require access to that specific
+  worktree metadata.
+
+- The ticket commit encountered the equivalent external worktree lock under
+  the TinyIDP source repository. It required the same narrowly scoped Git
+  metadata access; no additional repository files were added to the commit.
+
+### What I learned
+
+- `devctl up` intentionally returns after the wrapper creates its ready file.
+- `ProcessAlive` checks the persisted wrapper PID with `/proc` zombie
+  detection and `kill(pid, 0)`; the earlier status discrepancy may therefore
+  have been a timing race rather than a stable false-positive.
+- The wrapper calls `Setpgid` even though its parent already starts it with
+  `Setpgid: true`, and its child is assigned to the wrapper's process group.
+- The wrapper subscribes to `SIGTERM`, `SIGINT`, and `SIGHUP`, then forwards
+  each signal with `kill(-pgid, signal)`, which targets both child and wrapper.
+- Normal orphan reparenting is not sufficient to kill a devctl service. The
+  original disappearance requires a signal or an application-specific exit;
+  it is not an inherent consequence of `devctl up` returning.
+- The correct signal boundary is a child-owned process group. It contains the
+  service and descendants such as the compiled binary launched by `go run`,
+  while excluding the wrapper that receives and forwards control signals.
+
+### What was tricky to build
+
+- The harness must not leak a server if an assertion fails. Its exit trap
+  targets the verified wrapper process group and waits for the wrapper.
+- A free port is selected immediately before launch, but port allocation still
+  has an unavoidable bind race; the server log and exit metadata preserve that
+  distinction.
+- Sending `SIGHUP` to only the wrapper is intentional: it tests whether the
+  wrapper's forwarding code expands a single-process signal into a
+  process-group signal.
+- The wrapper must remain independently addressable because `devctl down`
+  signals the persisted wrapper PID's process group. The child must also own a
+  distinct group so its descendants receive forwarded signals. Using one group
+  for both roles collapses the control plane into the workload signal domain.
+
+### What warrants a second pair of eyes
+
+- Review the child-owned process-group contract for programs that deliberately
+  reassign their own process groups or sessions.
+- Review whether `SIGHUP` should remain a supported forwarded control signal.
+  The fix makes forwarding safe but does not change the existing policy.
+- Consider whether wrappers should eventually use a new session as additional
+  protection from terminal lifecycle signals. The current evidence proves
+  normal parent exit is safe and fixes self-signaling, so `setsid` was not
+  added speculatively.
+
+### What should be done in the future
+
+- Reinstall or otherwise select devctl commit `39ba416` before resuming the
+  TinyIDP runtime acceptance matrix; the previously installed binary does not
+  contain this fix.
+- Re-run the TinyIDP embedded and message-app profiles to determine whether the
+  original exits were caused by `SIGHUP` or whether an application-specific
+  failure remains.
+- If another spontaneous exit occurs, preserve the wrapper exit JSON and
+  capture SID/PGID evidence before cleanup.
+
+### Code review instructions
+
+- Begin with
+  `scripts/reproduce-devctl-wrapper-lifecycle.sh`.
+- Compare its process model with `pkg/supervise/supervisor.go:startService` and
+  `cmd/devctl/cmds/wrap_service.go:newWrapServiceCmd`.
+- Build devctl, run both harness modes into separate output directories, and
+  inspect `processes.txt` and `service.exit.json`.
+- Run:
+
+  ```text
+  go test ./cmd/devctl/cmds -run TestWrapServiceForwardsSIGHUPWithoutKillingWrapper -count=1
+  go test ./... -count=1
+  ```
+
+### Technical details
+
+Expected process topology before a signal:
+
+```text
+devctl __wrap-service (PID = PGID)
+└── python3 -m http.server (different PID, same PGID)
+```
+
+Current forwarding pseudocode:
+
+```text
+on SIGHUP:
+    kill(-child_process_group, SIGHUP)
+    # target set includes the service and descendants, not the wrapper
+```
+
+Validated process topology after the fix:
+
+```text
+devctl __wrap-service (PID = wrapper PGID)
+└── service child (PID = child PGID)
+    └── service descendants (inherit child PGID unless explicitly changed)
+```
