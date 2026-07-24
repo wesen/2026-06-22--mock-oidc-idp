@@ -71,3 +71,12 @@ Step 16: Established the manifest-driven devctl control plane for nine TinyIDP p
 
 - /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/.devctl.yaml — Environment profiles
 - /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/devctl/tinyidp.py — Control-plane implementation
+
+## 2026-07-24
+
+Step 17: Added Vault secret materialization and guarded Caddy storage backup/restore, stored live CA backup version 1, and proved a staging recovery with the identical root fingerprint (commit e3b0d5d).
+
+### Related Files
+
+- /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/devctl/operations.py — Security-sensitive operations
+- /home/manuel/workspaces/2026-07-07/prod-tiny-idp/tiny-idp/devctl/tests/test_operations.py — Recovery and materialization tests

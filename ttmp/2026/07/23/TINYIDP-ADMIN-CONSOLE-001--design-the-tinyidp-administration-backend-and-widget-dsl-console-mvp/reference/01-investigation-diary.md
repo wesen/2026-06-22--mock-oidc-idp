@@ -18,10 +18,16 @@ RelatedFiles:
       Note: Reference implementation inspected during research
     - Path: repo://.devctl.yaml
       Note: Profile selection and plugin registration added in control-plane interval
+    - Path: repo://dev/environments/admin-console.yaml
+      Note: Administration secret file contract
     - Path: repo://dev/environments/shared-two-apps.yaml
       Note: Representative production-shaped local environment manifest
     - Path: repo://devctl/lib/manifests.py
       Note: Strict environment manifest loader and invariants added in commit 655cd80
+    - Path: repo://devctl/operations.py
+      Note: Vault materialization and guarded Caddy recovery implementation (commit e3b0d5d)
+    - Path: repo://devctl/tests/test_operations.py
+      Note: Atomicity, validation, CAS, and Caddy archive evidence
     - Path: repo://devctl/tests/test_plugin.py
       Note: Protocol, dry-run, and utility-profile contract evidence
     - Path: repo://devctl/tinyidp.py
@@ -112,6 +118,7 @@ LastUpdated: 2026-07-23T20:14:57.931345362-04:00
 WhatFor: Preserve how the administration-backend proposal was derived, including concrete evidence, failed assumptions, and review instructions.
 WhenToUse: Read when reviewing the design, implementing a phase, or continuing the investigation.
 ---
+
 
 
 
@@ -2619,3 +2626,196 @@ environment.issuer
 vault.*
 services.<name>.health_url
 ```
+
+## Step 17: Materialize Vault secrets and prove Caddy CA recovery
+
+This step implemented the security-sensitive half of the environment platform:
+validated application-secret materialization and a guarded, versioned backup
+and staging-restore path for Caddy's complete local authority. The live Caddy
+volume remains authoritative during normal operation; Vault now contains the
+requested disaster-recovery copy.
+
+The implementation was exercised against the actual authenticated
+`scapegoat.dev` Vault and retained `tinyidp-local-caddy-pki` volume. A live
+storage export was written to KV v2 with CAS zero as version 1, restored into a
+new staging volume, re-exported, and verified to contain the identical root
+authority. The temporary recovery volume was deleted only after verification.
+
+### Prompt Context
+
+**User prompt (verbatim):** (same as Step 16)
+
+**Assistant interpretation:** Add secure Vault-backed application secrets and
+real Caddy private-CA safekeeping, prove recovery without touching live state,
+and preserve detailed operational evidence.
+
+**Inferred user intent:** Make local identity environments recoverable across
+workstation or Docker-volume loss without normal startup gaining authority to
+replace the trusted CA.
+
+**Commit (code):** `e3b0d5d` — "feat(dev): add Vault secret and Caddy recovery operations"
+
+### What I did
+
+- Extended environment manifests with typed secret-file contracts:
+  - Vault source record;
+  - source field;
+  - target filename;
+  - text/base64 encoding;
+  - exact or minimum decoded byte length.
+- Added `devctl/operations.py` with:
+  - Vault authentication checks;
+  - KV v2 reads and version parsing;
+  - owner-only materialization generations;
+  - atomic `runtime/secrets` symlink promotion;
+  - Caddy storage archive structural validation;
+  - KV v2 CAS backup;
+  - explicit-version, fingerprint-checked staging restore;
+  - nonempty and live-volume restore refusal.
+- Added unit tests for malformed lengths, atomic promotion, archive completeness,
+  first-backup initialization, CAS zero, and Docker argv.
+- Confirmed the real Vault server exposes KV v2 at `kv/`.
+- Confirmed the retained Caddy volume labels:
+
+  ```json
+  {"dev.wesen.purpose":"local-caddy-pki","dev.wesen.retention":"manual-delete-only"}
+  ```
+
+- Performed the first live backup:
+
+  ```text
+  path: tiny-idp/dev/_shared/caddy-local/pki-storage
+  Vault version: 1
+  root_sha256: 2ecbd59744bea116724ace518779c5b88585571cac70a301d65615f90397f362
+  archive_sha256: fea8c60f0ed02115bf6aac0fa431a7e131349fccf5eec9cb1a51b8bb34bac40f
+  archive bytes: 24576
+  ```
+
+- Restored version 1 into
+  `tinyidp-caddy-recovery-test-20260724`, verified the same root fingerprint,
+  and removed that staging volume.
+- Checked task `umal` only after the live recovery drill succeeded.
+
+### Why
+
+- Copying only `root.key` would omit the intermediate key, certificates, and
+  storage metadata that define the working authority.
+- KV v2 CAS prevents an unobserved writer from replacing the recovery record.
+- A staging-only restore with an expected root fingerprint prevents ordinary
+  startup and accidental operator commands from overwriting the live trusted
+  authority.
+- Atomic generation promotion ensures malformed or incomplete Vault records do
+  not partially replace the last complete materialization.
+
+### What worked
+
+- Fourteen local unit tests passed.
+- The live archive contained exactly one root certificate/key and intermediate
+  certificate/key.
+- `devctl pki-backup --profile shared-two-apps -- --initialize` created Vault
+  version 1 without putting the archive in argv or terminal output.
+- `devctl pki-restore` imported the selected version into an empty staging
+  volume and reproduced the root fingerprint.
+- The re-exported archive digest changed, as tar/storage serialization may
+  change, while the authority fingerprint remained stable. The restore
+  acceptance condition correctly uses the authority fingerprint.
+
+### What didn't work
+
+The first successful-backup unit test contained an incorrect assertion:
+
+```text
+AssertionError: 'archive' unexpectedly found in
+'{"schema_version": 1, "format": "caddy-storage-export-tar",
+"archive_b64": "YXJjaGl2ZQ==", ...}'
+```
+
+It intended to prove raw archive bytes were not exposed, but searched JSON
+field names containing the word `archive`. The assertion now checks that the
+payload is the expected base64 encoding.
+
+The first live export attempt failed generically:
+
+```text
+operations.OperationError: Caddy storage export failed
+```
+
+The targeted diagnostic produced:
+
+```text
+docker: Error response from daemon: ... exec: "storage": executable file not found in $PATH
+```
+
+Inspection showed the local `caddy:2.10.2-alpine` image has no entrypoint and
+uses:
+
+```text
+Entrypoint: null
+Cmd: ["caddy","run","--config","/etc/caddy/Caddyfile","--adapter","caddyfile"]
+```
+
+The implementation was corrected to invoke `caddy storage export/import`
+explicitly. The staging-volume emptiness check uses `--entrypoint sh`.
+
+### What I learned
+
+- The official image metadata, not an assumption about Docker Hub defaults,
+  determines whether the binary name belongs in argv.
+- A recovered archive is not required to be byte-identical after import/export;
+  certificate identity and required authority members are the durable
+  invariants.
+- Vault 1.21.2 and its KV v2 CLI support the required `-cas` and JSON file
+  input without placing secret payloads in process arguments.
+
+### What was tricky to build
+
+- Materialization must validate every field before promotion. Per-file atomic
+  renames still permit process death between files, so the implementation
+  writes an immutable generation and atomically swaps one symlink.
+- The Vault backup must distinguish a missing record from a read failure. The
+  current CLI wrapper intentionally presents both as an operation error; first
+  initialization still requires `--initialize` and CAS zero, so it cannot
+  overwrite an existing record.
+- Restore must allow Docker to create a missing staging volume while refusing a
+  nonempty one and categorically rejecting the live volume name.
+
+### What warrants a second pair of eyes
+
+- Review whether Vault policy should put the PKI archive on a dedicated mount,
+  not only a separate path.
+- Review whether the backup should quiesce Caddy explicitly on future storage
+  backends; the current file storage exported and restored consistently.
+- Review retention/garbage collection for old local secret generations.
+
+### What should be done in the future
+
+- Add an explicit idempotent application-secret initialization command using
+  CAS zero for development records.
+- Migrate Compose files to consume the managed file names.
+- Add a separate compromise/rotation playbook; restoration is not valid for a
+  known-compromised authority.
+
+### Code review instructions
+
+- Start with `devctl/operations.py`, specifically `materialize_secrets`,
+  `pki_backup`, and `pki_restore_staging`.
+- Review secret specifications in the three production-shaped manifests.
+- Run `python3 -m unittest discover -s devctl/tests -v`.
+- Do not rerun a live restore against `tinyidp-local-caddy-pki`; the command
+  deliberately refuses that target.
+
+### Technical details
+
+The Vault record has this non-secret metadata envelope:
+
+```text
+schema_version
+format=caddy-storage-export-tar
+archive_sha256
+root_cert_sha256
+caddy_image
+source_volume
+created_at
+```
+
+`archive_b64` is the only secret-bearing field and is never logged.

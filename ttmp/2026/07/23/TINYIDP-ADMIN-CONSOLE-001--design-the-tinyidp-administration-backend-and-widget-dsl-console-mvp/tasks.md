@@ -61,7 +61,7 @@
 - [ ] Document and test secret rotation and failure behavior <!-- t:8z7g -->
 - [ ] Implement manifest-driven devctl profiles for every runnable TinyIDP example and demo <!-- t:fkur -->
 - [ ] Implement Vault KV v2 tier/deployment layout and atomic secret materialization <!-- t:1wda -->
-- [ ] Implement guarded Caddy storage backup and staging restore through Vault with CAS and fingerprint verification <!-- t:umal -->
+- [x] Implement guarded Caddy storage backup and staging restore through Vault with CAS and fingerprint verification <!-- t:umal -->
 - [ ] Refactor shared-two-apps, admin-console, and Jitsi onto reusable HTTPS and Caddy PKI patterns <!-- t:c0f5 -->
 - [ ] Migrate embedded, external Message Desk, message-app, script, config, and user demos into devctl profiles <!-- t:bbyx -->
 - [ ] Add the Glazed tutorial for building and validating local TinyIDP applications <!-- t:ixlg -->
