@@ -59,6 +59,8 @@ func NewManagedOperationRunner(
 	return &ManagedOperationRunner{store: store, root: canonical, now: now}, nil
 }
 
+// tinyidp:development-default -- Execute builds diagnostics with a no-op audit sink; production hosts
+// inject a durable audit sink.
 func (r *ManagedOperationRunner) Execute(
 	ctx context.Context,
 	operation idpadminstore.Operation,
@@ -120,6 +122,8 @@ func (r *ManagedOperationRunner) Execute(
 	}
 }
 
+// tinyidp:development-default -- createDiagnostics builds diagnostics with a no-op audit sink; production
+// hosts inject a durable audit sink.
 func (r *ManagedOperationRunner) createDiagnostics(
 	ctx context.Context,
 	operation idpadminstore.Operation,

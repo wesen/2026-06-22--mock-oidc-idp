@@ -29,6 +29,8 @@ type adminUserProjection struct {
 	Version               int64
 }
 
+// tinyidp:transaction-scoped -- InitializeAdminResourceVersions runs inside AdminUpdate, which wraps all
+// mutations in a single BeginTx/Commit.
 func (s *Store) InitializeAdminResourceVersions(ctx context.Context, now time.Time) error {
 	return s.AdminUpdate(ctx, func(protocol idpstore.TxStore, admin idpadminstore.TxStore) error {
 		scoped, ok := admin.(*Store)
@@ -104,6 +106,8 @@ func (s *Store) InitializeAdminResourceVersions(ctx context.Context, now time.Ti
 	})
 }
 
+// tinyidp:transaction-scoped -- RebuildAdminUserProjection runs inside AdminUpdate, which wraps all
+// mutations in a single BeginTx/Commit.
 func (s *Store) RebuildAdminUserProjection(ctx context.Context, now time.Time) (idpadminstore.ProjectionReport, error) {
 	var report idpadminstore.ProjectionReport
 	err := s.AdminUpdate(ctx, func(_ idpstore.TxStore, admin idpadminstore.TxStore) error {
@@ -156,6 +160,8 @@ func (s *Store) CheckAdminUserProjection(ctx context.Context, now time.Time) (id
 	return report, nil
 }
 
+// tinyidp:transaction-scoped -- RefreshAdminUserProjection runs inside an AdminUpdate callback (s.runner is
+// the active transaction).
 func (s *Store) RefreshAdminUserProjection(ctx context.Context, userID string, now time.Time) error {
 	if s.runner == nil {
 		return fmt.Errorf("admin user projection refresh requires a transaction")
@@ -172,6 +178,8 @@ func (s *Store) RefreshAdminUserProjection(ctx context.Context, userID string, n
 	return idpstore.ErrNotFound
 }
 
+// tinyidp:transaction-scoped -- expectedAdminUserProjection runs inside an AdminUpdate callback; its
+// version-init mutation only executes within that transaction.
 func (s *Store) expectedAdminUserProjection(ctx context.Context, now time.Time, initializeVersions bool) ([]adminUserProjection, error) {
 	users, err := s.readProjectionUsers(ctx)
 	if err != nil {

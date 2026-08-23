@@ -131,10 +131,10 @@ github.com/go-go-golems/geppetto v0.13.11 h1:zeASUP/SoXECtXwiD3foqaj9ua2Gsiw+rHu
 github.com/go-go-golems/geppetto v0.13.11/go.mod h1:wXTHCMDcy1kCS6PVsWwZVISm81xXTNVlj6teneSdgOo=
 github.com/go-go-golems/glazed v1.4.3 h1:Wzcr/xJkNawKoT6I1KmiNYdprSNgUAbRU6EhT9PeDvM=
 github.com/go-go-golems/glazed v1.4.3/go.mod h1:d/xwH6o5N4lGv7Mz3x00hp9EiMSBOm4SAI+250Mfcps=
-github.com/go-go-golems/go-go-goja v0.10.6 h1:Y58s/AqzKmKKZjrFibPrtu8eV2zAjpcVVZE44AIdK70=
-github.com/go-go-golems/go-go-goja v0.10.6/go.mod h1:SfkEfsu4kMckh9OjK9hX09GAWJ8SI+5KHKF4dO/S0hU=
-github.com/go-go-golems/go-go-objects v0.0.2 h1:zStlGns0vPguA/QaJ40nahnfx7Adq5L8YJCx+RoKzyg=
-github.com/go-go-golems/go-go-objects v0.0.2/go.mod h1:Pid+27Ebp0Axs7MF/wdIfmA0hnYDWaZSlqKaPx9X3Ok=
+github.com/go-go-golems/go-go-goja v0.10.5-0.20260717152521-c6e464c5bbc6 h1:+VUi3NoMFOWjrUshsYKDXAoVniVEr6XsmQIqbwzj1c4=
+github.com/go-go-golems/go-go-goja v0.10.5-0.20260717152521-c6e464c5bbc6/go.mod h1:SfkEfsu4kMckh9OjK9hX09GAWJ8SI+5KHKF4dO/S0hU=
+github.com/go-go-golems/go-go-objects v0.0.3-0.20260712001519-46ba1952c9e4 h1:rP9Aopj5qjBs6ajxmBYXX5Y9SE/JOocBU7sWwu7GGu8=
+github.com/go-go-golems/go-go-objects v0.0.3-0.20260712001519-46ba1952c9e4/go.mod h1:Pid+27Ebp0Axs7MF/wdIfmA0hnYDWaZSlqKaPx9X3Ok=
 github.com/go-go-golems/logcopter v0.1.1 h1:/zrfmA7057hZyBoes+X9EpASP+aZQJx3kip89eRQqXM=
 github.com/go-go-golems/logcopter v0.1.1/go.mod h1:GUB5A7JwPVdYAu/8CKURcIaJb0h16nz8mKbkf5opzqo=
 github.com/go-go-golems/rag-evaluation-system v0.1.8 h1:l5pwlS31lDQb5SbE8yDbL5H0qvZ5VJo3W4JzVdWu5uY=

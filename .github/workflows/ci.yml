@@ -27,7 +27,7 @@ jobs:
       - name: Set up exact release Go toolchain
         uses: actions/setup-go@v6
         with:
-          go-version: 1.26.5
+          go-version: 1.26.6
           cache: true
 
       - name: Record toolchain and CGO environment
@@ -89,7 +89,7 @@ jobs:
       - name: Set up exact release Go toolchain
         uses: actions/setup-go@v6
         with:
-          go-version: 1.26.5
+          go-version: 1.26.6
           cache: true
 
       - name: Run repository linters
@@ -105,7 +105,7 @@ jobs:
       - name: Set up exact release Go toolchain
         uses: actions/setup-go@v6
         with:
-          go-version: 1.26.5
+          go-version: 1.26.6
           cache: true
 
       - name: Install pinned govulncheck

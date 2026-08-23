@@ -45,6 +45,8 @@ type UserCommandService struct {
 	now      func() time.Time
 }
 
+// tinyidp:development-default -- NewUserCommandService defaults the audit sink to a no-op; production
+// hosts inject a durable audit sink.
 func NewUserCommandService(
 	store UserCommandStore,
 	executor *Executor,

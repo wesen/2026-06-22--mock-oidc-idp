@@ -179,6 +179,8 @@ func newAdminConsoleRevokeSessionCommand(dbPath *string) (*AdminConsoleRevokeSes
 	return &AdminConsoleRevokeSessionCommand{CommandDescription: description, dbPath: dbPath, now: time.Now}, nil
 }
 
+// tinyidp:development-default -- the bootstrap CLI defaults the owner-provisioning audit sink to a no-op;
+// production hosts inject a durable audit sink.
 func (c *AdminConsoleBootstrapCommand) RunIntoGlazeProcessor(ctx context.Context, vals *values.Values, processor middlewares.Processor) error {
 	var cfg consoleBootstrapSettings
 	if err := vals.DecodeSectionInto(schema.DefaultSlug, &cfg); err != nil {
