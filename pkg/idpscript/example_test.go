@@ -16,8 +16,8 @@ func TestPhase0ExampleCompiles(t *testing.T) {
 	require.NoError(t, err)
 	options := idpscript.DefaultCompileOptions()
 	options.Schemas = map[string]idpprogram.Schema{
-		"signupInput": {
-			ID:       "signupInput",
+		"signupStartInput": {
+			ID:       "signupStartInput",
 			Kind:     idpprogram.SchemaKindObject,
 			MaxBytes: 4096,
 			Fields: map[string]idpprogram.SchemaField{

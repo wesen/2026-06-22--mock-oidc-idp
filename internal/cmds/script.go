@@ -66,7 +66,7 @@ func NewScriptCommand() (*cobra.Command, error) {
 }
 
 func newScriptSections() (schema.Section, schema.Section, error) {
-	glazedSection, err := settings.NewGlazedSchema()
+	glazedSection, err := settings.NewStructuredOutputSection()
 	if err != nil {
 		return nil, nil, fmt.Errorf("build output settings: %w", err)
 	}

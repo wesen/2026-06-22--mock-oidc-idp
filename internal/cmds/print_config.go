@@ -32,18 +32,16 @@ type PrintConfigCommand struct {
 
 // NewPrintConfigCommand builds the `print-config` command. It composes the
 // OIDC section and the Glazed output section so the result can be rendered
-// as json, yaml, or a table via the standard --output flag.
+// as json, yaml, or a table via the standard --format flag.
 func NewPrintConfigCommand() (*PrintConfigCommand, error) {
 	oidcSection, err := oidc.NewSection()
 	if err != nil {
 		return nil, fmt.Errorf("build oidc section: %w", err)
 	}
-	glazedSection, err := settings.NewGlazedSchema(
-		settings.WithOutputSectionOptions(
-			schema.WithDefaults(map[string]interface{}{
-				"output": "yaml",
-			}),
-		),
+	glazedSection, err := settings.NewStructuredOutputSection(
+		schema.WithDefaults(map[string]interface{}{
+			"format": "yaml",
+		}),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("build glazed section: %w", err)

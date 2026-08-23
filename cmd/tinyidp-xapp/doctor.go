@@ -28,7 +28,7 @@ type DoctorSettings struct {
 var _ cmds.GlazeCommand = (*DoctorCommand)(nil)
 
 func NewDoctorCommand() (*DoctorCommand, error) {
-	glazedSection, err := settings.NewGlazedSchema()
+	glazedSection, err := settings.NewStructuredOutputSection()
 	if err != nil {
 		return nil, errors.Wrap(err, "create glazed output section")
 	}

@@ -98,9 +98,9 @@ func newAdminConsoleCommand(dbPath *string) (*cobra.Command, error) {
 }
 
 func newAdminConsoleSections() (schema.Section, schema.Section, error) {
-	output, err := settings.NewGlazedSchema(settings.WithOutputSectionOptions(
-		schema.WithDefaults(map[string]any{"output": "json"}),
-	))
+	output, err := settings.NewStructuredOutputSection(
+		schema.WithDefaults(map[string]any{"format": "json"}),
+	)
 	if err != nil {
 		return nil, nil, err
 	}
