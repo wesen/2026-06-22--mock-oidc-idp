@@ -138,8 +138,10 @@ type DeviceGrantStore interface {
 type DurableInvitationStore interface {
 	CreateDurableInvitation(ctx context.Context, invitation DurableInvitation) error
 	GetDurableInvitation(ctx context.Context, codeHash []byte) (DurableInvitation, error)
+	GetDurableInvitationByID(ctx context.Context, invitationID string) (DurableInvitation, error)
 	RedeemDurableInvitation(ctx context.Context, codeHash []byte, audience string, now time.Time) (DurableInvitation, error)
 	RevokeDurableInvitation(ctx context.Context, codeHash []byte, now time.Time) error
+	RevokeDurableInvitationByID(ctx context.Context, invitationID string, now time.Time) (DurableInvitation, error)
 }
 
 type KeyStore interface {
@@ -192,6 +194,7 @@ type ReadStore interface {
 	GetDeviceGrantByUserCodeHash(ctx context.Context, userCodeHash []byte) (DeviceGrant, error)
 	InspectDeviceGrantByDeviceCodeHash(ctx context.Context, deviceCodeHash []byte, clientID string) (DeviceGrant, error)
 	GetDurableInvitation(ctx context.Context, codeHash []byte) (DurableInvitation, error)
+	GetDurableInvitationByID(ctx context.Context, invitationID string) (DurableInvitation, error)
 	ActiveSigningKey(ctx context.Context) (SigningKey, error)
 	VerificationKeys(ctx context.Context) ([]SigningKey, error)
 }
@@ -199,6 +202,12 @@ type ReadStore interface {
 // TxStore is the mutation surface scoped to one implementation transaction.
 type TxStore interface {
 	StoreOperations
+}
+
+// UserSecurityTx is the security-artifact revocation operation available to a
+// caller that already owns the store transaction.
+type UserSecurityTx interface {
+	RevokeUserSecurityArtifactsTx(ctx context.Context, userID string, at time.Time) error
 }
 
 // LockoutPolicy controls the atomic failed-login window and lock duration.

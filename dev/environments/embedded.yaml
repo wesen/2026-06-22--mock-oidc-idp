@@ -1,0 +1,24 @@
+schema_version: 1
+name: embedded
+classification: development
+description: One Go process serves an embedded TinyIDP and public PKCE relying party.
+origins:
+  issuer: http://127.0.0.1:5556/idp
+vault: {}
+required_tools: [go]
+required_paths:
+  - go.mod
+  - examples/embedded/main.go
+runtime:
+  kind: process
+  services:
+    - name: embedded
+      cwd: .
+      command: [go, run, ./examples/embedded]
+      health:
+        type: http
+        url: http://127.0.0.1:5556/
+        timeout_ms: 60000
+prepare: {}
+commands:
+  state-status: [sh, -c, "test -f tinyidp.db && ls -l tinyidp.db || true"]

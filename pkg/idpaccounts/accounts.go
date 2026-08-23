@@ -185,6 +185,23 @@ type SetPasswordRequest struct {
 	Password []byte
 }
 
+// PreparePassword validates and hashes a replacement password for a caller
+// that owns the surrounding protocol/admin transaction.
+func (s *Service) PreparePassword(
+	ctx context.Context,
+	userID, login string,
+	password []byte,
+) (idpstore.PasswordCredential, error) {
+	login = user.Normalize(login)
+	if strings.TrimSpace(userID) == "" || login == "" {
+		return idpstore.PasswordCredential{}, fmt.Errorf("user id and login are required")
+	}
+	if len(password) == 0 {
+		return idpstore.PasswordCredential{}, fmt.Errorf("password is required")
+	}
+	return s.hashCredential(ctx, userID, login, password, s.clock().UTC())
+}
+
 // SetPassword atomically replaces a credential and clears account lockout state.
 func (s *Service) SetPassword(ctx context.Context, req SetPasswordRequest) error {
 	login := user.Normalize(req.Login)
@@ -199,7 +216,7 @@ func (s *Service) SetPassword(ctx context.Context, req SetPasswordRequest) error
 		return err
 	}
 	now := s.clock().UTC()
-	credential, err := s.hashCredential(ctx, u.ID, login, req.Password, now)
+	credential, err := s.PreparePassword(ctx, u.ID, login, req.Password)
 	if err != nil {
 		return err
 	}

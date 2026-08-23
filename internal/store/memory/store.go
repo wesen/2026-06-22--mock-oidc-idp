@@ -1111,6 +1111,14 @@ func (s *Store) RevokeUserSecurityArtifacts(ctx context.Context, userID string, 
 	})
 }
 
+func (s *Store) RevokeUserSecurityArtifactsTx(_ context.Context, userID string, at time.Time) error {
+	if !s.inTransaction {
+		return errors.New("user security artifact revocation requires a transaction")
+	}
+	s.revokeUserSecurityArtifacts(userID, &at)
+	return nil
+}
+
 func (s *Store) revokeUserSecurityArtifacts(userID string, at *time.Time) {
 	when := time.Now().UTC()
 	if at != nil && !at.IsZero() {

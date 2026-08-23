@@ -1,5 +1,6 @@
 import { expect, Page, test } from "@playwright/test";
 import { execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 
@@ -7,10 +8,15 @@ const messageOrigin = process.env.TINYIDP_TEST_MESSAGE_ORIGIN ?? "https://messag
 const idpOrigin = process.env.TINYIDP_TEST_IDP_ORIGIN ?? "https://idp.localhost:8443";
 const gojaOrigin = process.env.TINYIDP_TEST_GOJA_ORIGIN ?? "https://goja.localhost:8443";
 const outboxOrigin = process.env.TINYIDP_TEST_OUTBOX_ORIGIN ?? "http://127.0.0.1:8025";
-const outboxAuthorization = process.env.TINYIDP_TEST_OUTBOX_AUTHORIZATION ??
-  `Basic ${Buffer.from("operator:local-outbox-password-2026!").toString("base64")}`;
+const outboxAuthorization = process.env.TINYIDP_TEST_OUTBOX_AUTHORIZATION;
 const execFileAsync = promisify(execFile);
 const composeFile = resolve(process.cwd(), "../compose.yaml");
+const secretDir = resolve(process.cwd(), "../runtime/secrets");
+
+function localSecret(envName: string, fileName: string): string {
+  return process.env[envName] ??
+    readFileSync(resolve(secretDir, fileName), "utf8").trim();
+}
 
 async function issueSignupInvitation(audience: string, ttl = "1h"): Promise<string> {
   const namespace = process.env.TINYIDP_TEST_KUBECTL_NAMESPACE;
@@ -92,7 +98,11 @@ async function submitIdentity(page: Page, displayName: string, email: string): P
   await page.getByRole("button", { name: "Create account" }).click();
 }
 
-async function loginToMessageDesk(page: Page, login = "admin@example.test", password = "local-admin-password-2026!"): Promise<void> {
+async function loginToMessageDesk(
+  page: Page,
+  login = "admin@example.test",
+  password = localSecret("TINYIDP_TEST_ADMIN_PASSWORD", "local-admin-password.txt")
+): Promise<void> {
   await page.goto(`${messageOrigin}/auth/login?return_to=/`);
   await page.getByLabel("Login").fill(login);
   await page.getByLabel("Password").fill(password);
@@ -104,7 +114,11 @@ async function loginToMessageDesk(page: Page, login = "admin@example.test", pass
   await expect(page.getByText("SIGNED IN")).toBeVisible();
 }
 
-async function loginToGojaAuth(page: Page, login = "admin@example.test", password = "local-admin-password-2026!"): Promise<void> {
+async function loginToGojaAuth(
+  page: Page,
+  login = "admin@example.test",
+  password = localSecret("TINYIDP_TEST_ADMIN_PASSWORD", "local-admin-password.txt")
+): Promise<void> {
   await page.goto(`${gojaOrigin}/auth/login?return_to=/`);
   if (page.url().startsWith(idpOrigin)) {
     const loginField = page.getByLabel("Login");
@@ -235,7 +249,9 @@ test("account chooser remembers two password logins and supports switching accou
   await page.getByRole("button", { name: "Use another account" }).click();
 
   await page.getByLabel("Login").fill("invitee@example.test");
-  await page.getByLabel("Password").fill("local-invitee-password-2026!");
+  await page.getByLabel("Password").fill(
+    localSecret("TINYIDP_TEST_INVITEE_PASSWORD", "local-invitee-password.txt")
+  );
   await page.getByRole("button", { name: /continue|sign in|approve/i }).first().click();
   if (page.url().startsWith(idpOrigin)) {
     await page.getByRole("button", { name: /approve|continue/i }).first().click();

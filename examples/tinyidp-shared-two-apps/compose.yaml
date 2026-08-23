@@ -10,12 +10,11 @@ services:
       - caddy-config:/config
     networks:
       idp-backend:
-        # Backend TLS clients and the IDP healthcheck deliberately resolve the
-        # public idp.localhost name to Caddy. Reserve the documented address so
-        # a fresh network cannot assign it to an earlier-starting container.
-        ipv4_address: 172.31.0.2
-      message-backend: {}
-      goja-backend: {}
+        aliases: [idp.localhost]
+      message-backend:
+        aliases: [message.localhost]
+      goja-backend:
+        aliases: [goja.localhost]
 
   ca-export:
     image: alpine:3.22
@@ -47,7 +46,6 @@ services:
     image: axllent/mailpit:v1.30.5
     ports: ["127.0.0.1:8025:8025"]
     environment:
-      MP_UI_AUTH: "operator:local-outbox-password-2026!"
       MP_MAX_MESSAGES: "100"
       MP_MAX_AGE: "1h"
       MP_SMTP_STRICT_RFC_HEADERS: "true"
@@ -62,16 +60,14 @@ services:
       - -ec
       - |
         umask 077
-        mkdir -p /state/audit
-        if [ ! -s /state/token.key ]; then dd if=/dev/urandom of=/state/token.key bs=32 count=1 status=none; fi
-        chmod 0600 /state/token.key
+        mkdir -p /state/audit /state/admin-artifacts
         if ! tinyidp admin --db=/state/tinyidp.sqlite user get --login=admin@example.test >/dev/null 2>&1; then
           tinyidp admin --db=/state/tinyidp.sqlite user create --login=admin@example.test --id=local-admin --sub=local-admin --email=admin@example.test --email-verified --name='Local Administrator' --password-from-stdin </state/.secrets/local_admin_password
         fi
         if ! tinyidp admin --db=/state/tinyidp.sqlite user get --login=invitee@example.test >/dev/null 2>&1; then
           tinyidp admin --db=/state/tinyidp.sqlite user create --login=invitee@example.test --id=local-invitee --sub=local-invitee --email=invitee@example.test --email-verified --name='Local Invitee' --password-from-stdin </state/.secrets/local_invitee_password
         fi
-        exec tinyidp serve-production --addr=:8081 --listener-mode=trusted-proxy-http --issuer=https://idp.localhost:8443 --clients-file=/config/clients.json --theme-dir=/config --theme-catalog-file=/config/themes.json --signup-program-file=/config/open-signup.js --db=/state/tinyidp.sqlite --audit-path=/state/audit/audit.jsonl --token-secret-file=/state/token.key --invitation-lookup-key-file=/state/.secrets/invitation_lookup_key --email-challenge-key-file=/state/.secrets/email_challenge_key --email-smtp-address=mailpit:1025 --email-smtp-tls-mode=private-plaintext --email-from-address=accounts@idp.localhost --email-from-name=TinyIDP --trusted-proxy-cidrs=172.31.0.0/24 --rate-limit=500 --account-chooser
+        exec tinyidp serve-production --addr=:8081 --listener-mode=trusted-proxy-http --issuer=https://idp.localhost:8443 --clients-file=/config/clients.json --theme-dir=/config --theme-catalog-file=/config/themes.json --signup-program-file=/config/open-signup.js --db=/state/tinyidp.sqlite --audit-path=/state/audit/audit.jsonl --token-secret-file=/state/.secrets/token_key --admin-auth-key-file=/state/.secrets/admin_auth_key --admin-action-key-file=/state/.secrets/admin_action_key --admin-backup-root=/state/admin-artifacts --invitation-lookup-key-file=/state/.secrets/invitation_lookup_key --email-challenge-key-file=/state/.secrets/email_challenge_key --email-smtp-address=mailpit:1025 --email-smtp-tls-mode=private-plaintext --email-from-address=accounts@idp.localhost --email-from-name=TinyIDP --trusted-proxy-cidrs=172.16.0.0/12 --rate-limit=500 --account-chooser
     depends_on:
       ca-export:
         condition: service_completed_successfully
@@ -86,9 +82,9 @@ services:
       - ./goja-auth.css:/config/goja-auth.css:ro
       - ./open-signup.js:/config/open-signup.js:ro
       - local-ca:/trust:ro
-    secrets: [local_admin_password, local_invitee_password, invitation_lookup_key, email_challenge_key]
+    secrets: [token_key, admin_auth_key, admin_action_key, local_admin_password, local_invitee_password, invitation_lookup_key, email_challenge_key]
     healthcheck:
-      test: ["CMD-SHELL", "curl --cacert /trust/caddy-local-root.crt -fsS --resolve idp.localhost:8443:172.31.0.2 https://idp.localhost:8443/readyz >/dev/null"]
+      test: ["CMD-SHELL", "curl -fsS -H 'Host: idp.localhost:8443' http://127.0.0.1:8081/readyz >/dev/null"]
       interval: 5s
       timeout: 3s
       retries: 24
@@ -102,7 +98,7 @@ services:
       - -ec
       - |
         if [ ! -f /state/state.json ]; then tinyidp-message-desk init --state-root /state --public-base-url https://message.localhost:8443; fi
-        exec tinyidp-message-desk serve --state-root /state --addr :8080 --listener-mode trusted-proxy-http --trusted-proxy-cidrs 172.32.0.0/24 --external-issuer https://idp.localhost:8443 --external-backchannel-url https://idp.localhost:8443
+        exec tinyidp-message-desk serve --state-root /state --addr :8080 --listener-mode trusted-proxy-http --trusted-proxy-cidrs 172.16.0.0/12 --external-issuer https://idp.localhost:8443 --external-backchannel-url https://idp.localhost:8443
     environment:
       # Caddy creates this local-only root. The application still verifies the
       # issuer certificate; it does not disable TLS verification.
@@ -110,7 +106,6 @@ services:
     volumes:
       - message-state:/state
       - local-ca:/trust:ro
-    extra_hosts: ["idp.localhost:172.31.0.2"]
     depends_on:
       idp:
         condition: service_healthy
@@ -119,7 +114,7 @@ services:
       message-backend:
         aliases: [message-proxy-backend]
     healthcheck:
-      test: ["CMD-SHELL", "curl -kfsS --resolve message.localhost:8443:172.32.0.2 https://message.localhost:8443/readyz >/dev/null"]
+      test: ["CMD-SHELL", "curl -fsS -H 'Host: message.localhost:8443' http://127.0.0.1:8080/readyz >/dev/null"]
       interval: 5s
       timeout: 3s
       retries: 24
@@ -129,7 +124,8 @@ services:
     environment:
       POSTGRES_DB: goja_auth
       POSTGRES_USER: goja
-      POSTGRES_PASSWORD: goja-local-development-only
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
     volumes: [goja-postgres:/var/lib/postgresql/data]
     networks: [goja-database]
     healthcheck:
@@ -143,16 +139,15 @@ services:
     build:
       context: ../../../go-go-goja
       dockerfile: Dockerfile.auth-host
-    command: ["serve", "sites", "demo"]
+    command: ["serve", "sites", "demo", "--config-file=/run/secrets/goja_auth_config"]
     environment:
       XGOJA_OIDC_DEMO_HTTP_LISTEN: :8080
       XGOJA_OIDC_DEMO_AUTH_MODE: oidc
       XGOJA_OIDC_DEMO_AUTH_DEFAULT_STORE_DRIVER: postgres
-      XGOJA_OIDC_DEMO_AUTH_DEFAULT_STORE_DSN: postgres://goja:goja-local-development-only@postgres:5432/goja_auth?sslmode=disable
       XGOJA_OIDC_DEMO_AUTH_DEFAULT_STORE_APPLY_SCHEMA: "true"
       XGOJA_OIDC_DEMO_AUTH_SESSION_COOKIE_ALLOW_INSECURE_HTTP: "false"
       XGOJA_OIDC_DEMO_AUTH_PROXY_MODE: trusted-forwarded
-      XGOJA_OIDC_DEMO_AUTH_PROXY_TRUSTED_CIDRS: 172.33.0.0/24
+      XGOJA_OIDC_DEMO_AUTH_PROXY_TRUSTED_CIDRS: 172.16.0.0/12
       XGOJA_OIDC_DEMO_AUTH_OIDC_ISSUER_URL: https://idp.localhost:8443
       XGOJA_OIDC_DEMO_AUTH_OIDC_CLIENT_ID: goja-auth-host-demo
       XGOJA_OIDC_DEMO_AUTH_OIDC_PUBLIC_BASE_URL: https://goja.localhost:8443
@@ -161,9 +156,9 @@ services:
       XGOJA_OIDC_DEMO_AUTH_OIDC_AFTER_LOGOUT_URL: /
       XGOJA_OIDC_DEMO_AUTH_OIDC_CALLBACK_ERROR_STYLESHEET_PATH: /static/styles.css
       SSL_CERT_FILE: /trust/caddy-local-root.crt
-    extra_hosts: ["idp.localhost:172.31.0.2"]
     volumes:
       - local-ca:/trust:ro
+    secrets: [goja_auth_config]
     depends_on:
       idp:
         condition: service_healthy
@@ -209,10 +204,10 @@ services:
     restart: "no"
 
 networks:
-  idp-backend: {ipam: {config: [{subnet: 172.31.0.0/24, ip_range: 172.31.0.128/25}]}}
-  message-backend: {ipam: {config: [{subnet: 172.32.0.0/24}]}}
-  goja-backend: {ipam: {config: [{subnet: 172.33.0.0/24}]}}
-  goja-database: {ipam: {config: [{subnet: 172.34.0.0/24}]}}
+  idp-backend:
+  message-backend:
+  goja-backend:
+  goja-database:
 
 volumes:
   idp-state:
@@ -225,6 +220,12 @@ volumes:
   local-ca:
 
 secrets:
+  token_key:
+    file: ./runtime/secrets/token.key
+  admin_auth_key:
+    file: ./runtime/secrets/admin-auth.key
+  admin_action_key:
+    file: ./runtime/secrets/admin-action.key
   local_admin_password:
     file: ./runtime/secrets/local-admin-password.txt
   local_invitee_password:
@@ -233,5 +234,9 @@ secrets:
     file: ./runtime/secrets/invitation-lookup.key
   email_challenge_key:
     file: ./runtime/secrets/email-challenge.key
+  postgres_password:
+    file: ./runtime/secrets/goja-postgres-password.txt
+  goja_auth_config:
+    file: ./runtime/secrets/goja-auth-config.yaml
   goja_appauth_dsn:
     file: ./runtime/secrets/goja-appauth-dsn.txt

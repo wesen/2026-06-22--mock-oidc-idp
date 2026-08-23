@@ -1,9 +1,16 @@
 import { Browser, BrowserContext, expect, Page, test } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 const idpOrigin = "https://idp.localhost:8443";
 const meetOrigin = "https://meet.localhost:8443";
 const adminLogin = "admin@example.test";
-const adminPassword = "local-jitsi-admin-password-2026!";
+const secretDir = resolve(process.cwd(), "../runtime/secrets");
+
+function localSecret(envName: string, fileName: string): string {
+  return process.env[envName] ??
+    readFileSync(resolve(secretDir, fileName), "utf8").trim();
+}
 
 async function conferenceJoined(page: Page): Promise<boolean> {
   return page.evaluate(() => {
@@ -45,7 +52,9 @@ async function mediaConnected(page: Page): Promise<boolean> {
 async function completeLogin(page: Page): Promise<void> {
   await expect(page).toHaveURL(new RegExp(`^${idpOrigin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/authorize`));
   await page.getByLabel("Login").fill(adminLogin);
-  await page.getByLabel("Password").fill(adminPassword);
+  await page.getByLabel("Password").fill(
+    localSecret("TINYIDP_TEST_ADMIN_PASSWORD", "local-admin-password.txt")
+  );
   await page.getByRole("button", { name: "Approve" }).click();
 }
 
@@ -106,7 +115,11 @@ test("the Goja policy denies an identity without an email claim", async ({ page 
   const room = `policy-denied-${Date.now()}`;
   await page.goto(`${meetOrigin}/${room}`);
   await clickPrejoin(page, "Policy Denied");
-  await loginAs(page, "denied@example.test", "local-jitsi-policy-denied-password-2026!");
+  await loginAs(
+    page,
+    "denied@example.test",
+    localSecret("TINYIDP_TEST_POLICY_DENIED_PASSWORD", "local-policy-denied-password.txt")
+  );
   await expect(page.getByRole("heading", { name: "Meeting access was not completed" })).toBeVisible();
   await expect(page.getByRole("alert")).toContainText("verified email address is required");
 });

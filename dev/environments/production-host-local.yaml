@@ -1,0 +1,21 @@
+schema_version: 1
+name: production-host-local
+classification: production-reference
+description: Inspect the strict production host's checked-in non-secret configuration.
+origins:
+  issuer: https://idp.example.test:8443
+vault:
+  tier: dev
+  deployment: production-host-local
+  runtime_path: tiny-idp/dev/production-host-local/runtime
+  bootstrap_path: tiny-idp/dev/production-host-local/bootstrap
+required_tools: [go]
+required_paths:
+  - examples/production-host/catalog/clients.json
+  - examples/production-host/themes/themes.json
+runtime:
+  kind: utility
+  services: []
+prepare: {}
+commands:
+  state-status: [go, run, ./cmd/tinyidp, serve-production, --help]

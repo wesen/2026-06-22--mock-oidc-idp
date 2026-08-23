@@ -6,10 +6,13 @@ containers. The browser uses `localhost:8081` as the canonical issuer and
 requests use the private Docker address `idp:8081`; the public issuer remains
 unchanged for authorization responses and ID-token validation.
 
-Run it from this directory:
+Use the manifest-driven profile from the repository root:
 
 ```sh
-docker compose up --build
+devctl --profile external-message-desk plan
+devctl --profile external-message-desk up
+devctl status
+devctl logs --service external-message-desk-compose --follow
 ```
 
 Open `http://localhost:8080`. The committed seed is intentionally public and
@@ -18,11 +21,12 @@ password in `demo-seed.json`. Replace the file with an operator-controlled
 secret mount before using any non-demo environment. Do not reuse a seeded
 demo password.
 
-The two named volumes are independent durable boundaries. Reset only the
-demo with:
+Stop with `devctl down`. The two named volumes are independent durable
+boundaries. Reset only this demo with the exact confirmation phrase:
 
 ```sh
-docker compose down -v
+devctl --profile external-message-desk state-reset -- \
+  --confirm reset-external-message-desk-state
 ```
 
 The provider owns accounts, its browser session, consent, chooser state, and

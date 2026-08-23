@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "defaultTheme": "admin-console",
+  "themes": {
+    "admin-console": {
+      "productName": "TinyIDP Console",
+      "stylesheet": "admin-console.css"
+    }
+  },
+  "clientThemes": {
+    "tinyidp-admin-console": "admin-console"
+  }
+}

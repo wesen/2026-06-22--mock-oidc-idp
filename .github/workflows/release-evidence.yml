@@ -26,7 +26,7 @@ jobs:
       - name: Set up exact release Go toolchain
         uses: actions/setup-go@v6
         with:
-          go-version: 1.26.5
+          go-version: 1.26.6
           cache: true
 
       - name: Build Linux amd64 evidence artifact

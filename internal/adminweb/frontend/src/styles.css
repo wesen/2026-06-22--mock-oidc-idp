@@ -1,0 +1,63 @@
+:root {
+  font-synthesis: none;
+}
+
+body > .visually-hidden-focusable {
+  color: #0a58ca;
+}
+
+.admin-nav {
+  width: 15rem;
+  flex: 0 0 15rem;
+}
+
+.admin-nav a:not(.active) {
+  color: #0a58ca;
+}
+
+.small-screen-warning {
+  display: none;
+}
+
+.admin-shell .btn-outline-primary {
+  --bs-btn-color: #0a58ca;
+  --bs-btn-border-color: #0a58ca;
+  --bs-btn-hover-bg: #0a58ca;
+  --bs-btn-hover-border-color: #0a58ca;
+  --bs-btn-active-bg: #084298;
+  --bs-btn-active-border-color: #084298;
+}
+
+@media (max-width: 767.98px) {
+  .admin-shell {
+    flex-direction: column;
+  }
+
+  .admin-nav {
+    width: 100%;
+    flex-basis: auto;
+  }
+
+  .admin-nav .nav {
+    flex-flow: row wrap;
+  }
+}
+
+@media (max-width: 479.98px) {
+  .small-screen-warning {
+    display: block;
+  }
+
+  .admin-mutation-surface {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

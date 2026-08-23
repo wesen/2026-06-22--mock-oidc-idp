@@ -53,7 +53,7 @@ func TestProductionHTTPHandlerServesOnlyTheRendererAssetsBelowStaticThemes(t *te
 		writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = writer.Write([]byte("provider route: " + request.URL.Path))
 	})
-	handler, err := productionHTTPHandler(provider, assets, nil, "", nil, 1024)
+	handler, err := productionHTTPHandler(provider, assets, nil, nil, "", nil, 1024)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,6 +71,34 @@ func TestProductionHTTPHandlerServesOnlyTheRendererAssetsBelowStaticThemes(t *te
 	handler.ServeHTTP(providerResponse, httptest.NewRequest(http.MethodGet, "https://idp.example.test/authorize", nil))
 	if providerResponse.Code != http.StatusOK || providerResponse.Body.String() != "provider route: /authorize" {
 		t.Fatalf("provider response = %d %q", providerResponse.Code, providerResponse.Body.String())
+	}
+}
+
+func TestProductionHTTPHandlerMountsAdminBeforeProviderFallback(t *testing.T) {
+	provider := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		_, _ = writer.Write([]byte("provider:" + request.URL.Path))
+	})
+	admin := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		_, _ = writer.Write([]byte("admin:" + request.URL.Path))
+	})
+	handler, err := productionHTTPHandler(provider, http.NotFoundHandler(), admin, nil, "", nil, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		"/admin", "/admin/users", "/api/admin/session",
+		"/api/widget/pages/overview", "/static/admin/assets/admin.js",
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "https://idp.example.test"+path, nil))
+		if got := response.Body.String(); got != "admin:"+path {
+			t.Fatalf("%s response = %q", path, got)
+		}
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "https://idp.example.test/authorize", nil))
+	if got := response.Body.String(); got != "provider:/authorize" {
+		t.Fatalf("provider fallback response = %q", got)
 	}
 }
 
@@ -295,8 +323,12 @@ func TestProductionCommandRequiresSignupProgramAndDropsLegacyRegistrationFlag(t 
 		t.Fatal("signup-program-file is not a required production flag")
 	}
 	lookupKey, ok := section.GetDefinitions().Get("invitation-lookup-key-file")
-	if !ok || lookupKey.Required {
-		t.Fatal("invitation lookup key must be conditionally required by the selected program")
+	if !ok || !lookupKey.Required {
+		t.Fatal("invitation lookup key must be required for administration issuance")
+	}
+	backupRoot, ok := section.GetDefinitions().Get("admin-backup-root")
+	if !ok || !backupRoot.Required {
+		t.Fatal("admin-backup-root must be explicit production configuration")
 	}
 	for _, conditional := range []string{"email-challenge-key-file", "email-smtp-address", "email-smtp-tls-mode", "email-smtp-password-file", "email-from-address"} {
 		definition, ok := section.GetDefinitions().Get(conditional)
@@ -323,6 +355,18 @@ func TestProductionCommandRequiresSignupProgramAndDropsLegacyRegistrationFlag(t 
 	}
 	if _, legacy := section.GetDefinitions().Get("message-desk-origin"); legacy {
 		t.Fatal("legacy message-desk-origin production flag is still exposed")
+	}
+}
+
+func TestAppendReadinessCheckFailsClosedAndRetainsDegradedChecks(t *testing.T) {
+	report := appendReadinessCheck(
+		idp.ReadinessReport{Ready: true},
+		idp.ReadinessCheck{Name: "outbox", Ready: true, Degraded: true},
+		idp.ReadinessCheck{Name: "operations", Ready: false, Degraded: true},
+	)
+	if report.Ready || len(report.Checks) != 2 ||
+		!report.Checks[0].Degraded || report.Checks[1].Ready {
+		t.Fatalf("combined readiness = %#v", report)
 	}
 }
 

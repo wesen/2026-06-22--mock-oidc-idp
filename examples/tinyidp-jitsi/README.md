@@ -16,11 +16,23 @@ to the host network.
 
 ## Start the stack
 
-Initialize local-only secrets and the persistent Caddy development CA:
+Authenticate the Vault CLI, then initialize missing KV v2 records, materialize
+the complete secret set, and ensure the retained Caddy volume exists:
 
 ```bash
 ./examples/tinyidp-jitsi/scripts/00-init-secrets.sh
 ```
+
+If this checkout has application volumes created by the former deterministic
+password script, stop the profile and perform one guarded state reset. New
+Vault passwords do not match hashes stored by the former fixture:
+
+```bash
+devctl down
+devctl --profile jitsi state-reset -- --confirm reset-jitsi-state
+```
+
+The reset retains the shared Caddy authority and is not part of normal startup.
 
 Start the services in tmux:
 
@@ -36,9 +48,10 @@ Export the public CA certificate:
 ```
 
 The CA private key remains inside the manually retained Docker volume
-`tinyidp-local-caddy-pki`. Only the public certificate is copied into
-`runtime/`. Deleting the volume invalidates every local certificate issued by
-that CA. Do not copy or commit the volume contents.
+`tinyidp-local-caddy-pki`; its encrypted disaster-recovery archive is stored at
+`kv/tiny-idp/dev/_shared/caddy-local/pki-storage`. Only the public certificate
+is copied into `runtime/`. Deleting the volume invalidates every local
+certificate issued by that CA. Never copy or commit the volume contents.
 
 Run the HTTP and configuration smoke checks:
 
@@ -54,11 +67,11 @@ Run the browser and conference checks:
 
 ## Local identity flows
 
-The deterministic local administrator is:
+The local administrator is:
 
 ```text
 login:    admin@example.test
-password: local-jitsi-admin-password-2026!
+password: runtime/secrets/local-admin-password.txt
 ```
 
 The browser suite also provisions an identity with no email claim so the Goja
@@ -66,7 +79,7 @@ policy-denial path can be tested deterministically:
 
 ```text
 login:    denied@example.test
-password: local-jitsi-policy-denied-password-2026!
+password: runtime/secrets/local-policy-denied-password.txt
 ```
 
 Jitsi sends an unauthenticated participant to:
@@ -123,12 +136,12 @@ Browser -> Jicofo -> JVB conference
 ## State and cleanup
 
 Database state, audit records, generated Jitsi configuration, and Caddy state
-use named volumes. `docker compose down` preserves them. To remove the example
-state while retaining the shared CA:
+use named volumes. `devctl down` preserves them. Use the guarded devctl command
+to remove example state while retaining the shared CA:
 
 ```bash
-docker compose -f examples/tinyidp-jitsi/compose.yaml down -v
+devctl --profile jitsi state-reset -- --confirm reset-jitsi-state
 ```
 
-The external `tinyidp-local-caddy-pki` volume is deliberately not removed by
-that command.
+The command refuses to run without the exact confirmation phrase and verifies
+that the external `tinyidp-local-caddy-pki` volume remains present.

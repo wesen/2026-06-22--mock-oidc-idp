@@ -1,0 +1,72 @@
+profile:
+  active: embedded
+
+profiles:
+  embedded:
+    display_name: Embedded provider
+    description: Run the one-process development HTTP provider and relying party.
+    plugins: [tinyidp]
+    env:
+      TINYIDP_DEV_MANIFEST: dev/environments/embedded.yaml
+
+  external-message-desk:
+    display_name: External Message Desk
+    description: Run the explicit development HTTP provider and Message Desk Compose stack.
+    plugins: [tinyidp]
+    env:
+      TINYIDP_DEV_MANIFEST: dev/environments/external-message-desk.yaml
+
+  shared-two-apps:
+    display_name: Shared HTTPS applications
+    description: Run production-shaped TinyIDP, Message Desk, and go-go-goja behind Caddy.
+    plugins: [tinyidp]
+    env:
+      TINYIDP_DEV_MANIFEST: dev/environments/shared-two-apps.yaml
+
+  jitsi:
+    display_name: TinyIDP Jitsi
+    description: Run the production-shaped TinyIDP and Jitsi local HTTPS integration.
+    plugins: [tinyidp]
+    env:
+      TINYIDP_DEV_MANIFEST: dev/environments/jitsi.yaml
+
+  admin-console:
+    display_name: TinyIDP admin console
+    description: Run the production-shaped administration console behind the shared Caddy CA.
+    plugins: [tinyidp]
+    env:
+      TINYIDP_DEV_MANIFEST: dev/environments/admin-console.yaml
+
+  message-app:
+    display_name: Self-contained Message App
+    description: Run the direct Go development HTTP message application.
+    plugins: [tinyidp]
+    env:
+      TINYIDP_DEV_MANIFEST: dev/environments/message-app.yaml
+
+  script-tools:
+    display_name: Signup script tools
+    description: Validate and explain TinyIDP signup programs without starting a server.
+    plugins: [tinyidp]
+    env:
+      TINYIDP_DEV_MANIFEST: dev/environments/script-tools.yaml
+
+  fixtures:
+    display_name: Configuration fixtures
+    description: Inspect checked-in client, realm, and seeded-user scenarios.
+    plugins: [tinyidp]
+    env:
+      TINYIDP_DEV_MANIFEST: dev/environments/fixtures.yaml
+
+  production-host-local:
+    display_name: Production host reference
+    description: Validate the strict production-host configuration without treating it as a deployment.
+    plugins: [tinyidp]
+    env:
+      TINYIDP_DEV_MANIFEST: dev/environments/production-host-local.yaml
+
+plugins:
+  - id: tinyidp
+    path: python3
+    args: [./devctl/tinyidp.py]
+    priority: 10

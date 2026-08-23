@@ -1,0 +1,16 @@
+schema_version: 1
+name: fixtures
+classification: utility
+description: Inspect checked-in TinyIDP configuration and seeded-user fixtures.
+origins: {}
+vault: {}
+required_tools: [go]
+required_paths:
+  - examples/configs/dev-root.yaml
+  - examples/users/personal-inbox-users.yaml
+runtime:
+  kind: utility
+  services: []
+prepare: {}
+commands:
+  smoke: [go, run, ./cmd/tinyidp, print-config, --config-file, examples/configs/dev-root.yaml]

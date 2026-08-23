@@ -1,4 +1,4 @@
-.PHONY: test test-fast test-fosite test-k3s-harness test-full build lint lintmax fmt fmt-check gosec vuln verify auditlint logcopter-generate logcopter-check docs-export goreleaser tag-major tag-minor tag-patch release install glazed-lint-build glazed-lint idpui-analyzer-build idpui-analyzer bump-go-go-golems image-tinyidp image-message-desk image-build image-smoke image-flow
+.PHONY: test test-fast test-fosite test-k3s-harness test-full build frontend-install frontend-check frontend-build lint lintmax fmt fmt-check gosec vuln verify auditlint logcopter-generate logcopter-check docs-export goreleaser tag-major tag-minor tag-patch release install glazed-lint-build glazed-lint idpui-analyzer-build idpui-analyzer bump-go-go-golems image-tinyidp image-message-desk image-build image-smoke image-flow
 
 GO_PACKAGES ?= ./...
 LOGCOPTER_PACKAGES ?= ./cmd/... ./internal/... ./pkg/...
@@ -65,6 +65,15 @@ test-full:
 build:
 	GOWORK=off go build $(GO_PACKAGES)
 
+frontend-install:
+	pnpm --dir internal/adminweb/frontend install --frozen-lockfile
+
+frontend-check:
+	pnpm --dir internal/adminweb/frontend run check
+
+frontend-build:
+	pnpm --dir internal/adminweb/frontend run build
+
 fmt:
 	GOWORK=off go fmt $(GO_PACKAGES)
 
@@ -84,7 +93,7 @@ $(GOSEC_BIN):
 gosec: $(GOSEC_BIN)
 	GOWORK=off $(GOSEC_BIN) -quiet -exclude-generated -exclude=G101,G204,G304,G301,G306 -exclude-dir=ttmp ./...
 
-verify: build test-full lint auditlint gosec vuln
+verify: frontend-check build test-full lint auditlint gosec vuln
 
 auditlint:
 	@for package in $(AUDITLINT_DIRS); do \

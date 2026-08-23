@@ -27,13 +27,25 @@ jobs:
       - name: Set up exact release Go toolchain
         uses: actions/setup-go@v6
         with:
-          go-version: 1.26.5
+          go-version: 1.26.6
           cache: true
 
       - name: Record toolchain and CGO environment
         run: |
           go version
           go env GOVERSION GOTOOLCHAIN GOWORK CGO_ENABLED GOOS GOARCH
+
+      - name: Enable pinned pnpm for admin console assets
+        run: corepack enable && corepack prepare pnpm@10.15.0 --activate
+
+      - name: Install admin console dependencies
+        run: make frontend-install
+
+      - name: Typecheck and build admin console
+        run: make frontend-check
+
+      - name: Verify committed admin console assets are current
+        run: git diff --exit-code -- internal/adminweb/frontend_dist
 
       - name: Build
         run: go build ./...
@@ -77,7 +89,7 @@ jobs:
       - name: Set up exact release Go toolchain
         uses: actions/setup-go@v6
         with:
-          go-version: 1.26.5
+          go-version: 1.26.6
           cache: true
 
       - name: Run repository linters
@@ -93,7 +105,7 @@ jobs:
       - name: Set up exact release Go toolchain
         uses: actions/setup-go@v6
         with:
-          go-version: 1.26.5
+          go-version: 1.26.6
           cache: true
 
       - name: Install pinned govulncheck

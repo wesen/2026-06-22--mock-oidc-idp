@@ -1,0 +1,20 @@
+schema_version: 1
+name: external-message-desk
+classification: development
+description: Separate loopback HTTP TinyIDP and Message Desk containers.
+origins:
+  issuer: http://localhost:8081
+vault: {}
+required_tools: [docker]
+required_paths:
+  - examples/tinyidp-external-message-desk/compose.yaml
+runtime:
+  kind: compose
+  services:
+    - name: external-message-desk-compose
+      cwd: examples/tinyidp-external-message-desk
+      command: [docker, compose, up, --build, --remove-orphans]
+prepare: {}
+commands:
+  state-status: [dev/scripts/compose-state.sh, external-message-desk, examples/tinyidp-external-message-desk/compose.yaml, status]
+  state-reset: [dev/scripts/compose-state.sh, external-message-desk, examples/tinyidp-external-message-desk/compose.yaml, reset-local]

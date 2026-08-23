@@ -1,77 +1,59 @@
-//go:build aix || darwin || dragonfly || freebsd || linux || netbsd || openbsd || solaris
-
 package cmds
 
 import (
+	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
-	"time"
 
-	"golang.org/x/sys/unix"
+	"github.com/go-go-golems/tiny-idp/pkg/sqlitestore"
+	"github.com/stretchr/testify/require"
 )
 
-func TestResolveClientSecretFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "secret")
-	if err := os.WriteFile(path, []byte("operator-managed-secret\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	secret, err := resolveClientSecret("", path, false)
-	if err != nil || secret != "operator-managed-secret" {
-		t.Fatalf("secret length=%d err=%v", len(secret), err)
-	}
-	if _, err := resolveClientSecret("inline", path, false); err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
-		t.Fatalf("mutual exclusion error = %v", err)
-	}
-	empty := filepath.Join(t.TempDir(), "empty")
-	if err := os.WriteFile(empty, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := resolveClientSecret("", empty, false); err == nil || !strings.Contains(err.Error(), "empty") {
-		t.Fatalf("empty error = %v", err)
-	}
-	symlink := filepath.Join(t.TempDir(), "symlink")
-	if err := os.Symlink(path, symlink); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := resolveClientSecret("", symlink, false); err == nil || !strings.Contains(err.Error(), "symlink") {
-		t.Fatalf("symlink error = %v", err)
-	}
-	tooLongSecret := filepath.Join(t.TempDir(), "too-long-secret")
-	if err := os.WriteFile(tooLongSecret, make([]byte, 73), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := resolveClientSecret("", tooLongSecret, false); err == nil || !strings.Contains(err.Error(), "72 bytes") {
-		t.Fatalf("long secret error = %v", err)
-	}
-	large := filepath.Join(t.TempDir(), "large")
-	if err := os.WriteFile(large, make([]byte, 4097), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := resolveClientSecret("", large, false); err == nil || !strings.Contains(err.Error(), "large") {
-		t.Fatalf("large file error = %v", err)
-	}
-}
+func TestAdminClientMutationsUseGuardedCommandLayer(t *testing.T) {
+	ctx := context.Background()
+	directory := t.TempDir()
+	dbPath := filepath.Join(directory, "tinyidp.sqlite")
+	ownerPassword := filepath.Join(directory, "owner-password")
+	actionKey := filepath.Join(directory, "admin-action-key")
+	require.NoError(t, os.WriteFile(ownerPassword, []byte("owner correct horse battery staple\n"), 0o600))
+	require.NoError(t, os.WriteFile(actionKey, []byte("0123456789abcdef0123456789abcdef"), 0o600))
+	runAdminCLI(t, ctx, "--db", dbPath, "console", "bootstrap",
+		"--owner-login", "owner", "--owner-password-file", ownerPassword,
+		"--public-base-url", "https://id.example")
 
-func TestResolveClientSecretFileRejectsFIFOWithoutBlocking(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "secret.fifo")
-	if err := unix.Mkfifo(path, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	output := runAdminCLI(t, ctx,
+		"--db", dbPath, "client", "--admin-action-key-file", actionKey,
+		"create", "--id", "engineering-app",
+		"--redirect-uri", "https://app.example.test/callback",
+		"--scope", "openid", "--grant-type", "authorization_code",
+	)
+	require.Contains(t, output, `"secret"`)
+	require.NotContains(t, output, `"SecretHash"`)
+	runAdminCLI(t, ctx,
+		"--db", dbPath, "client", "--admin-action-key-file", actionKey,
+		"update", "--id", "engineering-app",
+		"--redirect-uri", "https://app.example.test/callback/v2",
+		"--scope", "openid", "--grant-type", "authorization_code",
+	)
+	runAdminCLI(t, ctx,
+		"--db", dbPath, "client", "--admin-action-key-file", actionKey,
+		"disable", "--id", "engineering-app", "--reason", "Maintenance", "--confirm", "DISABLE",
+	)
+	output = runAdminCLI(t, ctx,
+		"--db", dbPath, "client", "--admin-action-key-file", actionKey,
+		"rotate-secret", "--id", "engineering-app", "--reason", "Scheduled", "--confirm", "ROTATE",
+	)
+	require.Contains(t, output, `"secret-rotated"`)
 
-	done := make(chan error, 1)
-	go func() {
-		_, err := resolveClientSecret("", path, false)
-		done <- err
-	}()
-
-	select {
-	case err := <-done:
-		if err == nil || !strings.Contains(err.Error(), "regular") {
-			t.Fatalf("FIFO error = %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("FIFO secret file blocked instead of being rejected")
-	}
+	store, err := sqlitestore.Open(ctx, sqlitestore.DefaultConfig(dbPath))
+	require.NoError(t, err)
+	defer store.Close()
+	version, err := store.GetResourceVersion(ctx, "client", "engineering-app")
+	require.NoError(t, err)
+	require.Equal(t, int64(4), version)
+	var actionCount int
+	require.NoError(t, store.SQLDB().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM admin_actions WHERE target_type='client'`).Scan(&actionCount))
+	require.Equal(t, 4, actionCount)
 }
